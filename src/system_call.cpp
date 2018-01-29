@@ -24,3 +24,5 @@
 //
 // If the system calls aren't needed, use the "libnosys.a" static library via
 // the linker (Project > Properties > C/C++ Build > Settings > GCC C++ Linker).
+
+#include "system_call_cpp.hpp"

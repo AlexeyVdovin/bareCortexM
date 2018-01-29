@@ -27,10 +27,9 @@ monitor reset halt
 monitor poll
 
 monitor flash probe 0
-#monitor flash protect 0 0 127 off # not supported by stlink-v1
+# monitor flash protect 0 0 127 off
 monitor reset halt
-monitor flash erase_sector 0 0 127
+monitor flash erase_sector 0 0 63
 monitor flash write_image bin/bareCortexM
-#monitor flash protect 0 0 127 on # not supported by stlink-v1
+# monitor flash protect 0 0 127 on
 monitor soft_reset_halt
-
