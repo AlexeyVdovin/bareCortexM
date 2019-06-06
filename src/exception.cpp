@@ -57,13 +57,59 @@ extern "C" void defaultExceptionHandler()
   }
 }
 
+extern "C" void NMI_ExceptionHandler()
+{
+  while (true) {
+  }
+}
+extern "C" void HardFault_ExceptionHandler()
+{
+  while (true) {
+  }
+}
+extern "C" void MemManage_ExceptionHandler()
+{
+  while (true) {
+  }
+}
+extern "C" void BusFault_ExceptionHandler()
+{
+  while (true) {
+  }
+}
+extern "C" void UsageFault_ExceptionHandler()
+{
+  while (true) {
+  }
+}
+extern "C" void SVCall_ExceptionHandler()
+{
+  while (true) {
+  }
+}
+extern "C" void DebugMon_ExceptionHandler()
+{
+  while (true) {
+  }
+}
+extern "C" void PendSV_ExceptionHandler()
+{
+  while (true) {
+  }
+}
+extern "C" void SysTick_ExceptionHandler()
+{
+  while (true) {
+  }
+}
+
 // Core exceptions
-#pragma weak NMI        = defaultExceptionHandler
-#pragma weak HardFault  = defaultExceptionHandler
-#pragma weak MemManage  = defaultExceptionHandler
-#pragma weak BusFault   = defaultExceptionHandler
-#pragma weak UsageFault = defaultExceptionHandler
-#pragma weak SVCall     = defaultExceptionHandler
-#pragma weak DebugMon   = defaultExceptionHandler
-#pragma weak PendSV     = defaultExceptionHandler
-#pragma weak SysTick    = defaultExceptionHandler
+#pragma weak NMI        = NMI_ExceptionHandler
+#pragma weak HardFault  = HardFault_ExceptionHandler
+#pragma weak MemManage  = MemManage_ExceptionHandler
+#pragma weak BusFault   = BusFault_ExceptionHandler
+#pragma weak UsageFault = UsageFault_ExceptionHandler
+#pragma weak SVCall     = SVCall_ExceptionHandler
+#pragma weak DebugMon   = DebugMon_ExceptionHandler
+#pragma weak PendSV     = PendSV_ExceptionHandler
+#pragma weak SysTick    = SysTick_ExceptionHandler

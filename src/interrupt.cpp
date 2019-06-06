@@ -25,3 +25,5 @@
 //
 // The user should take a look at the interrupt vector section of the target
 // device documentation.
+
+#include "interrupt_cpp.hpp"
