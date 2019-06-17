@@ -31,8 +31,10 @@
 #include "peripheral/adc.hpp"
 #include "peripheral/dma.hpp"
 #include "peripheral/tim.hpp"
+#include "peripheral/i2c.hpp"
 
 #define UART1_BAUD_RATE 115200
+#define I2C_SLAVE_ADDR  0x50
 
 typedef PB6 U1TX;
 typedef PB7 U1RX;
@@ -97,12 +99,20 @@ void initializeTimer()
   TIM2::configurePeriodicInterrupt< 1000 /* Hz */ >();
 }
 
+void initializeI2c()
+{
+  I2C1::enableClock();
+  I2C1::setSlaveAddr1(I2C_SLAVE_ADDR);
+  I2C1::setSlaveAddr2(I2C_SLAVE_ADDR);
+  I2C1::enablePeripheral();
+}
+
 void initializePeripherals()
 {
   initializeGpio();
   initializeTimer();
   initializeUsart1();
-
+  initializeI2c();
   TIM2::startCounter();
 }
 
@@ -130,3 +140,12 @@ void interrupt::TIM2()
   ++tick;
 }
 
+void interrupt::I2C1_EV()
+{
+
+}
+
+void interrupt::I2C1_ER()
+{
+
+}
