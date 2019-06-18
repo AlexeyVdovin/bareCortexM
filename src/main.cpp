@@ -105,14 +105,9 @@ void initializePeripherals()
   initializeGpio();
   initializeTimer();
   initializeUsart1();
-  initializeCan();
 
   TIM2::startCounter();
 }
-
-can::msg m0, m1;
-bool m0i = false;
-bool m1i = false;
 
 void loop()
 {
