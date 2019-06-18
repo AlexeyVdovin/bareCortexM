@@ -38,14 +38,9 @@
 
 typedef PB6 U1TX;
 typedef PB7 U1RX;
-typedef PC13 LED;
+typedef PB9 LED;
 
 u64 tick = 0;
-
-void clk::hseFailureHandler()
-{
-	while(1) {}
-}
 
 void initializeGpio()
 {
@@ -118,7 +113,12 @@ void initializePeripherals()
 
 void loop()
 {
-
+  static u64 timer_t1 = 0;
+  if(timer_t1 < tick)
+  {
+	  timer_t1 = tick + 1000;
+	  LED::setOutput(LED::isHigh() ? 0 : 1);
+  }
 }
 
 int main()
