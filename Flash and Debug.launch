@@ -13,7 +13,7 @@
 <stringAttribute key="org.eclipse.cdt.launch.DEBUGGER_STOP_AT_MAIN_SYMBOL" value="main"/>
 <booleanAttribute key="org.eclipse.cdt.launch.ENABLE_REGISTER_BOOKKEEPING" value="false"/>
 <booleanAttribute key="org.eclipse.cdt.launch.ENABLE_VARIABLE_BOOKKEEPING" value="false"/>
-<stringAttribute key="org.eclipse.cdt.launch.FORMAT" value="&lt;?xml version=&quot;1.0&quot; encoding=&quot;UTF-8&quot;?&gt;&lt;contentList&gt;&lt;content id=&quot;'main_template.cpp'::debugAddress--(format)&quot; val=&quot;2&quot;/&gt;&lt;content id=&quot;'main_template.cpp'::debug--(format)&quot; val=&quot;4&quot;/&gt;&lt;content id=&quot;'startup.cpp'::startupDebug--(format)&quot; val=&quot;4&quot;/&gt;&lt;content id=&quot;'main.cpp'::debug--(format)&quot; val=&quot;4&quot;/&gt;&lt;/contentList&gt;"/>
+<stringAttribute key="org.eclipse.cdt.launch.FORMAT" value="&lt;?xml version=&quot;1.0&quot; encoding=&quot;UTF-8&quot;?&gt;&lt;contentList&gt;&lt;content id=&quot;'main.cpp'::debug--(format)&quot; val=&quot;4&quot;/&gt;&lt;content id=&quot;'startup.cpp'::startupDebug--(format)&quot; val=&quot;4&quot;/&gt;&lt;content id=&quot;'main_template.cpp'::debug--(format)&quot; val=&quot;4&quot;/&gt;&lt;content id=&quot;'main_template.cpp'::debugAddress--(format)&quot; val=&quot;2&quot;/&gt;&lt;/contentList&gt;"/>
 <stringAttribute key="org.eclipse.cdt.launch.GLOBAL_VARIABLES" value="&lt;?xml version=&quot;1.0&quot; encoding=&quot;UTF-8&quot;?&gt;&lt;globalVariableList/&gt;"/>
 <stringAttribute key="org.eclipse.cdt.launch.MEMORY_BLOCKS" value="&lt;?xml version=&quot;1.0&quot; encoding=&quot;UTF-8&quot;?&gt;&lt;memoryBlockExpressionList/&gt;"/>
 <stringAttribute key="org.eclipse.cdt.launch.PROGRAM_NAME" value="bin/bareCortexM"/>

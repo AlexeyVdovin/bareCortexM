@@ -36,9 +36,9 @@
 #define UART1_BAUD_RATE 115200
 #define I2C_SLAVE_ADDR  0x50
 
-typedef PB6 U1TX;
-typedef PB7 U1RX;
-typedef PB9 LED;
+typedef PA9  U1TX;
+typedef PA10 U1RX;
+typedef PB9  LED;
 
 u64 tick = 0;
 
@@ -55,8 +55,6 @@ void initializeGpio()
 
 void initializeUsart1()
 {
-  AFIO::configureUsart1<afio::mapr::usart1::REMAP>();
-
   USART1::enableClock();
   USART1::configure(
       usart::cr1::rwu::RECEIVER_IN_ACTIVE_MODE,
@@ -96,8 +94,86 @@ void initializeTimer()
 
 void initializeI2c()
 {
-  TIM2::enableClock();
-  TIM2::configurePeriodicInterrupt< 1000 /* Hz */ >();
+  I2C1::enableClock();
+  I2C1::setSlaveAddr1(I2C_SLAVE_ADDR);
+  I2C1::setSlaveAddr2(I2C_SLAVE_ADDR);
+  I2C1::enablePeripheral();
+}
+
+/*
+ ADC2  ADC1
+------------
+In1 V, A
+In2 V, A
+In3 V, A
+In4 V, A
+VIn V, Temp
+Vcc/2, Vref
+- accumulate sum of V*V and number of samples
+- every second divide accumulated value by number of samples and get SQRT of it.
+*/
+void initializeAdc()
+{
+/*
+  ADC1::enableClock();
+  ADC2::enableClock();
+  ADC1::configure(
+    adc::cr1::awdch::SET_ANALOG_WATCHDOG_ON_CHANNEL0,
+    adc::cr1::eocie::END_OF_CONVERSION_INTERRUPT_DISABLED,
+    adc::cr1::awdie::ANALOG_WATCHDOG_INTERRUPT_DISABLED,
+    adc::cr1::jeocie::END_OF_ALL_INJECTED_CONVERSIONS_INTERRUPT_DISABLED,
+    adc::cr1::scan::SCAN_MODE_ENABLED,
+    adc::cr1::awdsgl::ANALOG_WATCHDOG_ENABLED_ON_ALL_CHANNELS,
+    adc::cr1::jauto::AUTOMATIC_INJECTED_CONVERSION_DISABLED,
+    adc::cr1::discen::DISCONTINUOUS_MODE_ON_REGULAR_CHANNELS_DISABLED,
+    adc::cr1::jdiscen::DISCONTINUOUS_MODE_ON_INJECTED_CHANNELS_DISABLED,
+    adc::cr1::discnum::_1_CHANNEL_FOR_DISCONTINUOUS_MODE,
+    adc::cr1::jawden::ANALOG_WATCHDOG_DISABLED_ON_INJECTED_CHANNELS,
+    adc::cr1::awden::ANALOG_WATCHDOG_DISABLED_ON_REGULAR_CHANNELS,
+    adc::cr1::res::_12_BITS_RESOLUTION,
+    adc::cr1::ovrie::OVERRUN_INTERRUPT_DISABLED,
+    adc::cr2::adon::ADC_ENABLED,
+    adc::cr2::cont::CONTINUOUS_CONVERSION_MODE,
+    adc::cr2::dma::DMA_MODE_ENABLED,
+    adc::cr2::dds::NO_NEW_DMA_REQUEST_IS_ISSUED_AFTER_THE_LAST_TRANSFER,
+    adc::cr2::eocs::EOC_BIT_IS_SET_AFTER_A_SEQUENCE_OF_REGULAR_CONVERSIONS,
+    adc::cr2::align::RIGTH_ALIGNED_DATA,
+    adc::cr2::jextsel::INJECTED_GROUP_TRIGGERED_BY_TIMER1_CC4,
+    adc::cr2::jexten::INJECTED_TRIGGER_DISABLED,
+    adc::cr2::jswstart::INJECTED_CHANNELS_ON_RESET_STATE,
+    adc::cr2::extsel::REGULAR_GROUP_TRIGGERED_BY_TIMER1_CC1,
+    adc::cr2::exten::REGULAR_TRIGGER_DISABLED,
+    adc::cr2::swstart::REGULAR_CHANNELS_ON_RESET_STATE);
+  ADC2::configure(
+    adc::cr1::awdch::SET_ANALOG_WATCHDOG_ON_CHANNEL0,
+    adc::cr1::eocie::END_OF_CONVERSION_INTERRUPT_DISABLED,
+    adc::cr1::awdie::ANALOG_WATCHDOG_INTERRUPT_DISABLED,
+    adc::cr1::jeocie::END_OF_ALL_INJECTED_CONVERSIONS_INTERRUPT_DISABLED,
+    adc::cr1::scan::SCAN_MODE_DISABLED,
+    adc::cr1::awdsgl::ANALOG_WATCHDOG_ENABLED_ON_ALL_CHANNELS,
+    adc::cr1::jauto::AUTOMATIC_INJECTED_CONVERSION_DISABLED,
+    adc::cr1::discen::DISCONTINUOUS_MODE_ON_REGULAR_CHANNELS_DISABLED,
+    adc::cr1::jdiscen::DISCONTINUOUS_MODE_ON_INJECTED_CHANNELS_DISABLED,
+    adc::cr1::discnum::_1_CHANNEL_FOR_DISCONTINUOUS_MODE,
+    adc::cr1::jawden::ANALOG_WATCHDOG_DISABLED_ON_INJECTED_CHANNELS,
+    adc::cr1::awden::ANALOG_WATCHDOG_DISABLED_ON_REGULAR_CHANNELS,
+    adc::cr1::res::_12_BITS_RESOLUTION,
+    adc::cr1::ovrie::OVERRUN_INTERRUPT_DISABLED,
+    adc::cr2::adon::ADC_ENABLED,
+    adc::cr2::cont::CONTINUOUS_CONVERSION_MODE,
+    adc::cr2::dma::DMA_MODE_DISABLED,
+    adc::cr2::dds::NO_NEW_DMA_REQUEST_IS_ISSUED_AFTER_THE_LAST_TRANSFER,
+    adc::cr2::eocs::EOC_BIT_IS_SET_AFTER_A_SEQUENCE_OF_REGULAR_CONVERSIONS,
+    adc::cr2::align::RIGTH_ALIGNED_DATA,
+    adc::cr2::jextsel::INJECTED_GROUP_TRIGGERED_BY_TIMER1_CC4,
+    adc::cr2::jexten::INJECTED_TRIGGER_DISABLED,
+    adc::cr2::jswstart::INJECTED_CHANNELS_ON_RESET_STATE,
+    adc::cr2::extsel::REGULAR_GROUP_TRIGGERED_,
+    adc::cr2::exten::REGULAR_TRIGGER_DISABLED,
+    adc::cr2::swstart::REGULAR_CHANNELS_ON_RESET_STATE);
+  ADC1::setRegularSequenceOrder<1, 0>();
+  ADC1::setNumberOfRegularChannels<1>();
+*/
 }
 
 void initializePeripherals()
@@ -105,17 +181,19 @@ void initializePeripherals()
   initializeGpio();
   initializeTimer();
   initializeUsart1();
+  initializeI2c();
 
   TIM2::startCounter();
 }
 
 void loop()
 {
-  static u64 timer_t1 = 0;
+  static u64 timer_t1 = 500;
   if(timer_t1 < tick)
   {
-	  timer_t1 = tick + 1000;
+	  timer_t1 = tick + 500;
 	  LED::setOutput(LED::isHigh() ? 0 : 1);
+	  printf("Hello !!!\n");
   }
 }
 
@@ -140,10 +218,36 @@ void interrupt::TIM2()
 
 void interrupt::I2C1_EV()
 {
+	if(I2C1::isAddrMatched())
+	{
+
+
+	}
+	else if(I2C1::isStopReceived())
+	{
+
+
+	}
+	else if(I2C1::hasReceivedData())
+	{
+
+
+	}
+	else if(I2C1::canSendData())
+	{
+
+
+	}
+
 
 }
 
 void interrupt::I2C1_ER()
+{
+
+}
+
+void interrupt::DMA1_Channel1()
 {
 
 }
