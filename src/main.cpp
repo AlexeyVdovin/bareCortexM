@@ -96,10 +96,26 @@ void initializeTimer()
 
 void initializeI2c()
 {
-  I2C1::enableClock();
+  I2C1::enableClock(); // Uses APB1 clock
+  I2C1::configure(
+    i2c::cr1::pe::PERIPHERAL_DISABLED,
+    i2c::cr1::enpec::PACKET_ERROR_CHECKING_DISABLED,
+    i2c::cr1::engc::GENERAL_CALL_DISABLED,
+    i2c::cr1::nostretch::CLOCK_STRETCHING_ENABLED,
+    i2c::cr2::iterren::ERROR_INTERRUPT_ENABLED,
+    i2c::cr2::itevten::EVENT_INTERRUPT_ENABLED,
+    i2c::cr2::itbufen::BUFFER_INTERRUPT_ENABLED,
+    i2c::cr2::dmaen::DMA_REQUEST_DISABLED,
+    i2c::cr2::last::NEXT_DMA_IS_NOT_THE_LAST_TRANSFER);
+  I2C1::configureClock<
+    i2c::ccr::f_s::STANDARD_MODE,
+    i2c::ccr::duty::T_LOW_2_T_HIGH_1,
+    100000 /* Hz */ >();
   I2C1::setSlaveAddr1(I2C_SLAVE_ADDR);
-  I2C1::setSlaveAddr2(I2C_SLAVE_ADDR);
+  I2C1::setSlaveAddr2(0);
   I2C1::enablePeripheral();
+
+  I2C1::unmaskInterrupts();
 }
 
 /*
@@ -223,9 +239,11 @@ void loop()
   {
 	  timer_t1 = tick + 500;
 	  LED::setOutput(LED::isHigh() ? 0 : 1);
-	  printf("Hello !!!\n");
+	  //printf("Hello !!!\n");
 
 	  ADC1::enablePeripheral(); // Start conversion
+	  printf("ADC: %08x\n0: %08x\n1: %08x\n2: %08x\n3: %08x\n4: %08x\n5: %08x\n6: %08x\n7: %08x\n", dma_count,
+			  dma_adc_buff[0], dma_adc_buff[1], dma_adc_buff[2], dma_adc_buff[3], dma_adc_buff[4], dma_adc_buff[5], dma_adc_buff[6], dma_adc_buff[7]);
   }
 }
 
