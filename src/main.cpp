@@ -20,6 +20,7 @@
  ******************************************************************************/
 
 #include <stdio.h>
+#include <string.h>
 
 #include "clock.hpp"
 
@@ -39,6 +40,7 @@
 typedef PA9  U1TX;
 typedef PA10 U1RX;
 typedef PB9  LED;
+typedef DMA1_CHANNEL1 DMA_ADC1;
 
 u64 tick = 0;
 
@@ -114,7 +116,7 @@ Vcc/2, Vref
 */
 void initializeAdc()
 {
-/*
+
   ADC1::enableClock();
   ADC2::enableClock();
   ADC1::configure(
@@ -128,20 +130,17 @@ void initializeAdc()
     adc::cr1::discen::DISCONTINUOUS_MODE_ON_REGULAR_CHANNELS_DISABLED,
     adc::cr1::jdiscen::DISCONTINUOUS_MODE_ON_INJECTED_CHANNELS_DISABLED,
     adc::cr1::discnum::_1_CHANNEL_FOR_DISCONTINUOUS_MODE,
+    adc::cr1::dualmod::DUALMODE_REGSIMULT_MODE,
     adc::cr1::jawden::ANALOG_WATCHDOG_DISABLED_ON_INJECTED_CHANNELS,
     adc::cr1::awden::ANALOG_WATCHDOG_DISABLED_ON_REGULAR_CHANNELS,
-    adc::cr1::res::_12_BITS_RESOLUTION,
-    adc::cr1::ovrie::OVERRUN_INTERRUPT_DISABLED,
     adc::cr2::adon::ADC_ENABLED,
     adc::cr2::cont::CONTINUOUS_CONVERSION_MODE,
     adc::cr2::dma::DMA_MODE_ENABLED,
-    adc::cr2::dds::NO_NEW_DMA_REQUEST_IS_ISSUED_AFTER_THE_LAST_TRANSFER,
-    adc::cr2::eocs::EOC_BIT_IS_SET_AFTER_A_SEQUENCE_OF_REGULAR_CONVERSIONS,
     adc::cr2::align::RIGTH_ALIGNED_DATA,
-    adc::cr2::jextsel::INJECTED_GROUP_TRIGGERED_BY_TIMER1_CC4,
+    adc::cr2::jextsel::INJECTED_GROUP_TRIGGERED_BY_TIMER1_TRGO,
     adc::cr2::jexten::INJECTED_TRIGGER_DISABLED,
     adc::cr2::jswstart::INJECTED_CHANNELS_ON_RESET_STATE,
-    adc::cr2::extsel::REGULAR_GROUP_TRIGGERED_BY_TIMER1_CC1,
+    adc::cr2::extsel::REGULAR_GROUP_TRIGGERED_BY_SWSTART,
     adc::cr2::exten::REGULAR_TRIGGER_DISABLED,
     adc::cr2::swstart::REGULAR_CHANNELS_ON_RESET_STATE);
   ADC2::configure(
@@ -155,25 +154,53 @@ void initializeAdc()
     adc::cr1::discen::DISCONTINUOUS_MODE_ON_REGULAR_CHANNELS_DISABLED,
     adc::cr1::jdiscen::DISCONTINUOUS_MODE_ON_INJECTED_CHANNELS_DISABLED,
     adc::cr1::discnum::_1_CHANNEL_FOR_DISCONTINUOUS_MODE,
+    adc::cr1::dualmod::INDEPENDENT_MODE,
     adc::cr1::jawden::ANALOG_WATCHDOG_DISABLED_ON_INJECTED_CHANNELS,
     adc::cr1::awden::ANALOG_WATCHDOG_DISABLED_ON_REGULAR_CHANNELS,
-    adc::cr1::res::_12_BITS_RESOLUTION,
-    adc::cr1::ovrie::OVERRUN_INTERRUPT_DISABLED,
     adc::cr2::adon::ADC_ENABLED,
     adc::cr2::cont::CONTINUOUS_CONVERSION_MODE,
     adc::cr2::dma::DMA_MODE_DISABLED,
-    adc::cr2::dds::NO_NEW_DMA_REQUEST_IS_ISSUED_AFTER_THE_LAST_TRANSFER,
-    adc::cr2::eocs::EOC_BIT_IS_SET_AFTER_A_SEQUENCE_OF_REGULAR_CONVERSIONS,
     adc::cr2::align::RIGTH_ALIGNED_DATA,
     adc::cr2::jextsel::INJECTED_GROUP_TRIGGERED_BY_TIMER1_CC4,
     adc::cr2::jexten::INJECTED_TRIGGER_DISABLED,
     adc::cr2::jswstart::INJECTED_CHANNELS_ON_RESET_STATE,
-    adc::cr2::extsel::REGULAR_GROUP_TRIGGERED_,
+    adc::cr2::extsel::REGULAR_GROUP_TRIGGERED_BY_SWSTART,
     adc::cr2::exten::REGULAR_TRIGGER_DISABLED,
     adc::cr2::swstart::REGULAR_CHANNELS_ON_RESET_STATE);
   ADC1::setRegularSequenceOrder<1, 0>();
   ADC1::setNumberOfRegularChannels<1>();
-*/
+  ADC2::setRegularSequenceOrder<1, 1>();
+  ADC2::setNumberOfRegularChannels<1>();
+}
+
+#define NUM_DMA_ADC 8
+u32 dma_count;
+u32 dma_adc_buff[NUM_DMA_ADC];
+
+void initializeDma()
+{
+  dma_count = 0;
+  memset(dma_adc_buff, 0, sizeof(dma_adc_buff));
+
+  DMA_ADC1::enableClock();
+  DMA_ADC1::configure(
+      dma::channel::cr::tcie::TRANSFER_COMPLETE_INTERRUPT_ENABLED,
+      dma::channel::cr::htie::HALF_TRANSFER_INTERRUPT_DISABLED,
+      dma::channel::cr::teie::TRANSFER_ERROR_INTERRUPT_DISABLED,
+      dma::channel::cr::dir::READ_FROM_PERIPHERAL,
+      dma::channel::cr::circ::CIRCULAR_MODE_DISABLED,
+      dma::channel::cr::pinc::PERIPHERAL_INCREMENT_MODE_DISABLED,
+      dma::channel::cr::minc::MEMORY_INCREMENT_MODE_ENABLED,
+      dma::channel::cr::psize::PERIPHERAL_SIZE_32BITS,
+      dma::channel::cr::msize::MEMORY_SIZE_32BITS,
+      dma::channel::cr::pl::CHANNEL_PRIORITY_LEVEL_HIGH,
+      dma::channel::cr::mem2mem::MEMORY_TO_MEMORY_MODE_DISABLED);
+  DMA_ADC1::setMemoryAddress(dma_adc_buff);
+  DMA_ADC1::setNumberOfTransactions(NUM_DMA_ADC);
+  DMA_ADC1::setPeripheralAddress(&ADC1_REGS->DR);
+
+  DMA_ADC1::enablePeripheral();
+
 }
 
 void initializePeripherals()
@@ -181,10 +208,13 @@ void initializePeripherals()
   initializeGpio();
   initializeTimer();
   initializeUsart1();
+  initializeAdc();
+  initializeDma();
   initializeI2c();
 
   TIM2::startCounter();
 }
+
 
 void loop()
 {
@@ -194,6 +224,8 @@ void loop()
 	  timer_t1 = tick + 500;
 	  LED::setOutput(LED::isHigh() ? 0 : 1);
 	  printf("Hello !!!\n");
+
+	  ADC1::enablePeripheral(); // Start conversion
   }
 }
 
@@ -249,5 +281,6 @@ void interrupt::I2C1_ER()
 
 void interrupt::DMA1_Channel1()
 {
-
+  DMA_ADC1::clearTransferCompleteFlag();
+  ++dma_count;
 }
