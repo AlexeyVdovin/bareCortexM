@@ -1,0 +1,4 @@
+[submodule "libstm32pp"]
+	path = libstm32pp
+	url = git@github.com:AlexeyVdovin/libstm32pp.git
+	branch = refs/heads/av/stm32f103c8t6
