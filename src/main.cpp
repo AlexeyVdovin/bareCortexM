@@ -90,6 +90,7 @@ void initializeUsart1()
 
 void initializeTimer()
 {
+	// TODO: Switch to SysTimer
   TIM2::enableClock();
   TIM2::configurePeriodicInterrupt< 1000 /* Hz */ >();
 }
@@ -150,21 +151,21 @@ void initializeAdc()
     adc::cr1::jawden::ANALOG_WATCHDOG_DISABLED_ON_INJECTED_CHANNELS,
     adc::cr1::awden::ANALOG_WATCHDOG_DISABLED_ON_REGULAR_CHANNELS,
     adc::cr2::adon::ADC_ENABLED,
-    adc::cr2::cont::CONTINUOUS_CONVERSION_MODE,
+    adc::cr2::cont::SINGLE_CONVERSION_MODE,
     adc::cr2::dma::DMA_MODE_ENABLED,
-    adc::cr2::align::RIGTH_ALIGNED_DATA,
+    adc::cr2::align::LEFT_ALIGNED_DATA,
     adc::cr2::jextsel::INJECTED_GROUP_TRIGGERED_BY_TIMER1_TRGO,
     adc::cr2::jexten::INJECTED_TRIGGER_DISABLED,
     adc::cr2::jswstart::INJECTED_CHANNELS_ON_RESET_STATE,
     adc::cr2::extsel::REGULAR_GROUP_TRIGGERED_BY_SWSTART,
-    adc::cr2::exten::REGULAR_TRIGGER_DISABLED,
-    adc::cr2::swstart::REGULAR_CHANNELS_ON_RESET_STATE);
+    adc::cr2::exten::REGULAR_TRIGGER_ENABLED,
+    adc::cr2::swstart::START_CONVERSION_ON_REGULAR_CHANNELS);
   ADC2::configure(
     adc::cr1::awdch::SET_ANALOG_WATCHDOG_ON_CHANNEL0,
     adc::cr1::eocie::END_OF_CONVERSION_INTERRUPT_DISABLED,
     adc::cr1::awdie::ANALOG_WATCHDOG_INTERRUPT_DISABLED,
     adc::cr1::jeocie::END_OF_ALL_INJECTED_CONVERSIONS_INTERRUPT_DISABLED,
-    adc::cr1::scan::SCAN_MODE_DISABLED,
+    adc::cr1::scan::SCAN_MODE_ENABLED,
     adc::cr1::awdsgl::ANALOG_WATCHDOG_ENABLED_ON_ALL_CHANNELS,
     adc::cr1::jauto::AUTOMATIC_INJECTED_CONVERSION_DISABLED,
     adc::cr1::discen::DISCONTINUOUS_MODE_ON_REGULAR_CHANNELS_DISABLED,
@@ -174,29 +175,79 @@ void initializeAdc()
     adc::cr1::jawden::ANALOG_WATCHDOG_DISABLED_ON_INJECTED_CHANNELS,
     adc::cr1::awden::ANALOG_WATCHDOG_DISABLED_ON_REGULAR_CHANNELS,
     adc::cr2::adon::ADC_ENABLED,
-    adc::cr2::cont::CONTINUOUS_CONVERSION_MODE,
+    adc::cr2::cont::SINGLE_CONVERSION_MODE,
     adc::cr2::dma::DMA_MODE_DISABLED,
     adc::cr2::align::RIGTH_ALIGNED_DATA,
     adc::cr2::jextsel::INJECTED_GROUP_TRIGGERED_BY_TIMER1_CC4,
     adc::cr2::jexten::INJECTED_TRIGGER_DISABLED,
     adc::cr2::jswstart::INJECTED_CHANNELS_ON_RESET_STATE,
     adc::cr2::extsel::REGULAR_GROUP_TRIGGERED_BY_SWSTART,
-    adc::cr2::exten::REGULAR_TRIGGER_DISABLED,
-    adc::cr2::swstart::REGULAR_CHANNELS_ON_RESET_STATE);
+    adc::cr2::exten::REGULAR_TRIGGER_ENABLED,
+    adc::cr2::swstart::START_CONVERSION_ON_REGULAR_CHANNELS);
+
+  ADC1::setConversionTime<0, adc::smp::SAMPLING_TIME_13_5_CYCLES>();
+  ADC1::setConversionTime<1, adc::smp::SAMPLING_TIME_13_5_CYCLES>();
+  ADC1::setConversionTime<2, adc::smp::SAMPLING_TIME_13_5_CYCLES>();
+  ADC1::setConversionTime<3, adc::smp::SAMPLING_TIME_13_5_CYCLES>();
+  ADC1::setConversionTime<4, adc::smp::SAMPLING_TIME_13_5_CYCLES>();
+  ADC1::setConversionTime<5, adc::smp::SAMPLING_TIME_13_5_CYCLES>();
+  ADC1::setConversionTime<6, adc::smp::SAMPLING_TIME_13_5_CYCLES>();
+  ADC1::setConversionTime<7, adc::smp::SAMPLING_TIME_13_5_CYCLES>();
+  ADC1::setConversionTime<8, adc::smp::SAMPLING_TIME_13_5_CYCLES>();
+  ADC1::setConversionTime<9, adc::smp::SAMPLING_TIME_13_5_CYCLES>();
+  ADC1::setConversionTime<10, adc::smp::SAMPLING_TIME_13_5_CYCLES>();
+  ADC1::setConversionTime<11, adc::smp::SAMPLING_TIME_13_5_CYCLES>();
+  ADC1::setConversionTime<12, adc::smp::SAMPLING_TIME_13_5_CYCLES>();
+  ADC1::setConversionTime<13, adc::smp::SAMPLING_TIME_13_5_CYCLES>();
+  ADC1::setConversionTime<14, adc::smp::SAMPLING_TIME_13_5_CYCLES>();
+  ADC1::setConversionTime<15, adc::smp::SAMPLING_TIME_13_5_CYCLES>();
+  ADC1::setConversionTime<16, adc::smp::SAMPLING_TIME_13_5_CYCLES>();
+  ADC1::setConversionTime<17, adc::smp::SAMPLING_TIME_13_5_CYCLES>();
+
+  ADC2::setConversionTime<0, adc::smp::SAMPLING_TIME_13_5_CYCLES>();
+  ADC2::setConversionTime<1, adc::smp::SAMPLING_TIME_13_5_CYCLES>();
+  ADC2::setConversionTime<2, adc::smp::SAMPLING_TIME_13_5_CYCLES>();
+  ADC2::setConversionTime<3, adc::smp::SAMPLING_TIME_13_5_CYCLES>();
+  ADC2::setConversionTime<4, adc::smp::SAMPLING_TIME_13_5_CYCLES>();
+  ADC2::setConversionTime<5, adc::smp::SAMPLING_TIME_13_5_CYCLES>();
+  ADC2::setConversionTime<6, adc::smp::SAMPLING_TIME_13_5_CYCLES>();
+  ADC2::setConversionTime<7, adc::smp::SAMPLING_TIME_13_5_CYCLES>();
+  ADC2::setConversionTime<8, adc::smp::SAMPLING_TIME_13_5_CYCLES>();
+  ADC2::setConversionTime<9, adc::smp::SAMPLING_TIME_13_5_CYCLES>();
+  ADC2::setConversionTime<10, adc::smp::SAMPLING_TIME_13_5_CYCLES>();
+  ADC2::setConversionTime<11, adc::smp::SAMPLING_TIME_13_5_CYCLES>();
+  ADC2::setConversionTime<12, adc::smp::SAMPLING_TIME_13_5_CYCLES>();
+  ADC2::setConversionTime<13, adc::smp::SAMPLING_TIME_13_5_CYCLES>();
+  ADC2::setConversionTime<14, adc::smp::SAMPLING_TIME_13_5_CYCLES>();
+  ADC2::setConversionTime<15, adc::smp::SAMPLING_TIME_13_5_CYCLES>();
+  ADC2::setConversionTime<16, adc::smp::SAMPLING_TIME_13_5_CYCLES>();
+  ADC2::setConversionTime<17, adc::smp::SAMPLING_TIME_13_5_CYCLES>();
+
   ADC1::setRegularSequenceOrder<1, 0>();
-  ADC1::setNumberOfRegularChannels<1>();
+  ADC1::setRegularSequenceOrder<2, 0>();
+  ADC1::setRegularSequenceOrder<3, 0>();
+  ADC1::setRegularSequenceOrder<4, 0>();
+  ADC1::setRegularSequenceOrder<5, 0>();
+  ADC1::setRegularSequenceOrder<6, 0>();
+  ADC1::setNumberOfRegularChannels<6>();
   ADC2::setRegularSequenceOrder<1, 1>();
-  ADC2::setNumberOfRegularChannels<1>();
+  ADC2::setRegularSequenceOrder<2, 1>();
+  ADC2::setRegularSequenceOrder<3, 1>();
+  ADC2::setRegularSequenceOrder<4, 1>();
+  ADC2::setRegularSequenceOrder<5, 1>();
+  ADC2::setRegularSequenceOrder<6, 1>();
+  ADC2::setNumberOfRegularChannels<6>();
+
 }
 
 #define NUM_DMA_ADC 8
-u32 dma_count;
-u32 dma_adc_buff[NUM_DMA_ADC];
+volatile u32 dma_count;
+volatile u32 dma_adc_buff[NUM_DMA_ADC];
 
 void initializeDma()
 {
   dma_count = 0;
-  memset(dma_adc_buff, 0, sizeof(dma_adc_buff));
+  memset((void*)dma_adc_buff, 0, sizeof(dma_adc_buff));
 
   DMA_ADC1::enableClock();
   DMA_ADC1::configure(
@@ -209,13 +260,14 @@ void initializeDma()
       dma::channel::cr::minc::MEMORY_INCREMENT_MODE_ENABLED,
       dma::channel::cr::psize::PERIPHERAL_SIZE_32BITS,
       dma::channel::cr::msize::MEMORY_SIZE_32BITS,
-      dma::channel::cr::pl::CHANNEL_PRIORITY_LEVEL_HIGH,
+      dma::channel::cr::pl::CHANNEL_PRIORITY_LEVEL_LOW,
       dma::channel::cr::mem2mem::MEMORY_TO_MEMORY_MODE_DISABLED);
-  DMA_ADC1::setMemoryAddress(dma_adc_buff);
-  DMA_ADC1::setNumberOfTransactions(NUM_DMA_ADC);
+  DMA_ADC1::setMemoryAddress((void*)dma_adc_buff);
+  DMA_ADC1::setNumberOfTransactions(6);
   DMA_ADC1::setPeripheralAddress(&ADC1_REGS->DR);
 
   DMA_ADC1::enablePeripheral();
+  DMA_ADC1::unmaskInterrupts();
 
 }
 
@@ -227,6 +279,9 @@ void initializePeripherals()
   initializeAdc();
   initializeDma();
   initializeI2c();
+
+  ADC2::enablePeripheral(); // Start conversion
+  ADC1::enablePeripheral(); // Start conversion
 
   TIM2::startCounter();
 }
@@ -240,10 +295,12 @@ void loop()
 	  timer_t1 = tick + 500;
 	  LED::setOutput(LED::isHigh() ? 0 : 1);
 	  //printf("Hello !!!\n");
-
-	  ADC1::enablePeripheral(); // Start conversion
 	  printf("ADC: %08x\n0: %08x\n1: %08x\n2: %08x\n3: %08x\n4: %08x\n5: %08x\n6: %08x\n7: %08x\n", dma_count,
 			  dma_adc_buff[0], dma_adc_buff[1], dma_adc_buff[2], dma_adc_buff[3], dma_adc_buff[4], dma_adc_buff[5], dma_adc_buff[6], dma_adc_buff[7]);
+	  //memset((void*)dma_adc_buff, 0, sizeof(dma_adc_buff));
+	  //ADC1::startRegularConversions();
+
+
   }
 }
 
@@ -299,6 +356,13 @@ void interrupt::I2C1_ER()
 
 void interrupt::DMA1_Channel1()
 {
-  DMA_ADC1::clearTransferCompleteFlag();
+//  DMA_ADC1::setMemoryAddress((void*)dma_adc_buff);
+//  DMA_ADC1::setNumberOfTransactions(8);
+
   ++dma_count;
+//  ADC1::disablePeripheral();
+//  ADC2::disablePeripheral();
+
+  DMA_ADC1::clearGlobalFlag();
+  DMA_ADC1::disablePeripheral();
 }
