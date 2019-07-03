@@ -153,7 +153,7 @@ void initializeAdc()
     adc::cr2::adon::ADC_ENABLED,
     adc::cr2::cont::SINGLE_CONVERSION_MODE,
     adc::cr2::dma::DMA_MODE_ENABLED,
-    adc::cr2::align::LEFT_ALIGNED_DATA,
+    adc::cr2::align::RIGTH_ALIGNED_DATA,
     adc::cr2::jextsel::INJECTED_GROUP_TRIGGERED_BY_TIMER1_TRGO,
     adc::cr2::jexten::INJECTED_TRIGGER_DISABLED,
     adc::cr2::jswstart::INJECTED_CHANNELS_ON_RESET_STATE,
@@ -266,7 +266,7 @@ void initializeDma()
   DMA_ADC1::setNumberOfTransactions(6);
   DMA_ADC1::setPeripheralAddress(&ADC1_REGS->DR);
 
-  DMA_ADC1::enablePeripheral();
+  // DMA_ADC1::enablePeripheral();
   DMA_ADC1::unmaskInterrupts();
 
 }
@@ -279,10 +279,12 @@ void initializePeripherals()
   initializeAdc();
   initializeDma();
   initializeI2c();
-
-  ADC2::enablePeripheral(); // Start conversion
+/*
   ADC1::enablePeripheral(); // Start conversion
+  ADC2::enablePeripheral(); // Start conversion
 
+  ADC1::startRegularConversions();
+*/
   TIM2::startCounter();
 }
 
@@ -297,9 +299,9 @@ void loop()
 	  //printf("Hello !!!\n");
 	  printf("ADC: %08x\n0: %08x\n1: %08x\n2: %08x\n3: %08x\n4: %08x\n5: %08x\n6: %08x\n7: %08x\n", dma_count,
 			  dma_adc_buff[0], dma_adc_buff[1], dma_adc_buff[2], dma_adc_buff[3], dma_adc_buff[4], dma_adc_buff[5], dma_adc_buff[6], dma_adc_buff[7]);
-	  //memset((void*)dma_adc_buff, 0, sizeof(dma_adc_buff));
-	  //ADC1::startRegularConversions();
-
+	  memset((void*)dma_adc_buff, 0, sizeof(dma_adc_buff));
+	  DMA_ADC1::enablePeripheral();
+	  ADC1::enablePeripheral(); // Start conversion
 
   }
 }
@@ -356,13 +358,9 @@ void interrupt::I2C1_ER()
 
 void interrupt::DMA1_Channel1()
 {
-//  DMA_ADC1::setMemoryAddress((void*)dma_adc_buff);
-//  DMA_ADC1::setNumberOfTransactions(8);
-
   ++dma_count;
-//  ADC1::disablePeripheral();
-//  ADC2::disablePeripheral();
-
   DMA_ADC1::clearGlobalFlag();
   DMA_ADC1::disablePeripheral();
+  DMA_ADC1::setNumberOfTransactions(6);
+
 }
