@@ -40,6 +40,22 @@
 typedef PA9  U1TX;
 typedef PA10 U1RX;
 typedef PB9  LED;
+
+
+typedef PA0  IN4C;
+typedef PA1  IN3C;
+typedef PA2  IN2C;
+typedef PA3  IN1C;
+typedef PA4  IN4V;
+typedef PA5  IN3V;
+typedef PA6  IN2V;
+typedef PA7  IN1V;
+
+typedef PB0  VIN;
+typedef PB1  VDIV;
+
+
+
 typedef DMA1_CHANNEL1 DMA_ADC1;
 
 u64 tick = 0;
@@ -53,6 +69,16 @@ void initializeGpio()
   AFIO::enableClock();
 
   LED::setMode(gpio::cr::GP_PUSH_PULL_2MHZ);
+  IN1C::setMode(gpio::cr::ANALOG_INPUT);
+  IN1V::setMode(gpio::cr::ANALOG_INPUT);
+  IN2C::setMode(gpio::cr::ANALOG_INPUT);
+  IN2V::setMode(gpio::cr::ANALOG_INPUT);
+  IN3C::setMode(gpio::cr::ANALOG_INPUT);
+  IN3V::setMode(gpio::cr::ANALOG_INPUT);
+  IN4C::setMode(gpio::cr::ANALOG_INPUT);
+  IN4V::setMode(gpio::cr::ANALOG_INPUT);
+  VIN::setMode(gpio::cr::ANALOG_INPUT);
+  VDIV::setMode(gpio::cr::ANALOG_INPUT);
 }
 
 void initializeUsart1()
@@ -122,20 +148,23 @@ void initializeI2c()
 /*
  ADC2  ADC1
 ------------
-In1 V, A
-In2 V, A
-In3 V, A
-In4 V, A
-VIn V, Temp
-Vcc/2, Vref
+In1 V, A - A7, A3
+In2 V, A - A6, A2
+In3 V, A - A5, A1
+In4 V, A - A4, A0
+VIn V, Temp - A8, A16
+Vcc/2, Vref - A9, A17
+
 - accumulate sum of V*V and number of samples
 - every second divide accumulated value by number of samples and get SQRT of it.
 */
 void initializeAdc()
 {
-
   ADC1::enableClock();
   ADC2::enableClock();
+
+  // for(int i = 0; i < 100000; ++i) {}
+
   ADC1::configure(
     adc::cr1::awdch::SET_ANALOG_WATCHDOG_ON_CHANNEL0,
     adc::cr1::eocie::END_OF_CONVERSION_INTERRUPT_DISABLED,
@@ -159,7 +188,8 @@ void initializeAdc()
     adc::cr2::jswstart::INJECTED_CHANNELS_ON_RESET_STATE,
     adc::cr2::extsel::REGULAR_GROUP_TRIGGERED_BY_SWSTART,
     adc::cr2::exten::REGULAR_TRIGGER_ENABLED,
-    adc::cr2::swstart::START_CONVERSION_ON_REGULAR_CHANNELS);
+    adc::cr2::swstart::START_CONVERSION_ON_REGULAR_CHANNELS,
+    adc::cr2::tsvrefe::TEMPERATURE_SENSOR_ENABLED);
   ADC2::configure(
     adc::cr1::awdch::SET_ANALOG_WATCHDOG_ON_CHANNEL0,
     adc::cr1::eocie::END_OF_CONVERSION_INTERRUPT_DISABLED,
@@ -183,7 +213,8 @@ void initializeAdc()
     adc::cr2::jswstart::INJECTED_CHANNELS_ON_RESET_STATE,
     adc::cr2::extsel::REGULAR_GROUP_TRIGGERED_BY_SWSTART,
     adc::cr2::exten::REGULAR_TRIGGER_ENABLED,
-    adc::cr2::swstart::START_CONVERSION_ON_REGULAR_CHANNELS);
+    adc::cr2::swstart::START_CONVERSION_ON_REGULAR_CHANNELS,
+    adc::cr2::tsvrefe::TEMPERATURE_SENSOR_ENABLED);
 
   ADC1::setConversionTime<0, adc::smp::SAMPLING_TIME_13_5_CYCLES>();
   ADC1::setConversionTime<1, adc::smp::SAMPLING_TIME_13_5_CYCLES>();
@@ -223,31 +254,49 @@ void initializeAdc()
   ADC2::setConversionTime<16, adc::smp::SAMPLING_TIME_13_5_CYCLES>();
   ADC2::setConversionTime<17, adc::smp::SAMPLING_TIME_13_5_CYCLES>();
 
-  ADC1::setRegularSequenceOrder<1, 0>();
-  ADC1::setRegularSequenceOrder<2, 0>();
-  ADC1::setRegularSequenceOrder<3, 0>();
+  ADC1::setRegularSequenceOrder<1, 3>();
+  ADC1::setRegularSequenceOrder<2, 2>();
+  ADC1::setRegularSequenceOrder<3, 1>();
   ADC1::setRegularSequenceOrder<4, 0>();
-  ADC1::setRegularSequenceOrder<5, 0>();
-  ADC1::setRegularSequenceOrder<6, 0>();
+  ADC1::setRegularSequenceOrder<5, 16>();
+  ADC1::setRegularSequenceOrder<6, 17>();
   ADC1::setNumberOfRegularChannels<6>();
-  ADC2::setRegularSequenceOrder<1, 1>();
-  ADC2::setRegularSequenceOrder<2, 1>();
-  ADC2::setRegularSequenceOrder<3, 1>();
-  ADC2::setRegularSequenceOrder<4, 1>();
-  ADC2::setRegularSequenceOrder<5, 1>();
-  ADC2::setRegularSequenceOrder<6, 1>();
+  ADC2::setRegularSequenceOrder<1, 9>();
+  ADC2::setRegularSequenceOrder<2, 8>();
+  ADC2::setRegularSequenceOrder<3, 4>();
+  ADC2::setRegularSequenceOrder<4, 5>();
+  ADC2::setRegularSequenceOrder<5, 6>();
+  ADC2::setRegularSequenceOrder<6, 7>();
   ADC2::setNumberOfRegularChannels<6>();
+
+  ADC1::disablePeripheral();
+  for(int i = 0; i < 100000; ++i) {}
+  ADC1::enablePeripheral();
+  ADC1::resetCalibration();
+  while(!ADC1::hasCalibrationInitialized()) {}
+  ADC1::startCalibration();
+  while(!ADC1::hasCalibrationEnded()) {}
+
+  ADC2::disablePeripheral();
+  for(int i = 0; i < 100000; ++i) {}
+  ADC2::enablePeripheral();
+  ADC2::resetCalibration();
+  while(!ADC2::hasCalibrationInitialized()) {}
+  ADC2::startCalibration();
+  while(!ADC2::hasCalibrationEnded()) {}
 
 }
 
-#define NUM_DMA_ADC 8
+#define NUM_DMA_ADC 6
 volatile u32 dma_count;
-volatile u32 dma_adc_buff[NUM_DMA_ADC];
+volatile u32 dma_adc_buff[8];
+volatile s64 rms_ch[9];
 
 void initializeDma()
 {
   dma_count = 0;
   memset((void*)dma_adc_buff, 0, sizeof(dma_adc_buff));
+  memset((void*)rms_ch, 0, sizeof(rms_ch));
 
   DMA_ADC1::enableClock();
   DMA_ADC1::configure(
@@ -263,12 +312,11 @@ void initializeDma()
       dma::channel::cr::pl::CHANNEL_PRIORITY_LEVEL_LOW,
       dma::channel::cr::mem2mem::MEMORY_TO_MEMORY_MODE_DISABLED);
   DMA_ADC1::setMemoryAddress((void*)dma_adc_buff);
-  DMA_ADC1::setNumberOfTransactions(6);
+  DMA_ADC1::setNumberOfTransactions(NUM_DMA_ADC);
   DMA_ADC1::setPeripheralAddress(&ADC1_REGS->DR);
 
-  // DMA_ADC1::enablePeripheral();
+  DMA_ADC1::enablePeripheral();
   DMA_ADC1::unmaskInterrupts();
-
 }
 
 void initializePeripherals()
@@ -279,12 +327,7 @@ void initializePeripherals()
   initializeAdc();
   initializeDma();
   initializeI2c();
-/*
-  ADC1::enablePeripheral(); // Start conversion
-  ADC2::enablePeripheral(); // Start conversion
 
-  ADC1::startRegularConversions();
-*/
   TIM2::startCounter();
 }
 
@@ -294,15 +337,16 @@ void loop()
   static u64 timer_t1 = 500;
   if(timer_t1 < tick)
   {
-	  timer_t1 = tick + 500;
-	  LED::setOutput(LED::isHigh() ? 0 : 1);
-	  //printf("Hello !!!\n");
-	  printf("ADC: %08x\n0: %08x\n1: %08x\n2: %08x\n3: %08x\n4: %08x\n5: %08x\n6: %08x\n7: %08x\n", dma_count,
-			  dma_adc_buff[0], dma_adc_buff[1], dma_adc_buff[2], dma_adc_buff[3], dma_adc_buff[4], dma_adc_buff[5], dma_adc_buff[6], dma_adc_buff[7]);
-	  memset((void*)dma_adc_buff, 0, sizeof(dma_adc_buff));
-	  DMA_ADC1::enablePeripheral();
-	  ADC1::enablePeripheral(); // Start conversion
+    timer_t1 = tick + 500;
+    LED::setOutput(LED::isHigh() ? 0 : 1);
+  //printf("Hello !!!\n");
+    printf("ADC: %08x\n0: %08x\n1: %08x\n2: %08x\n3: %08x\n4: %08x\n5: %08x\n", dma_count,
+		  dma_adc_buff[0], dma_adc_buff[1], dma_adc_buff[2], dma_adc_buff[3], dma_adc_buff[4], dma_adc_buff[5]);
+    memset((void*)dma_adc_buff, 0, sizeof(dma_adc_buff));
 
+    DMA_ADC1::enablePeripheral();
+    ADC2::enablePeripheral(); // Start conversion
+    ADC1::enablePeripheral(); // Start conversion
   }
 }
 
@@ -355,12 +399,64 @@ void interrupt::I2C1_ER()
 {
 
 }
+/*
+ ADC2  ADC1
+------------
+In1 V, A - A7, A3
+In2 V, A - A6, A2
+In3 V, A - A5, A1
+In4 V, A - A4, A0
+VIn V, Temp - A8, A16
+Vcc/2, Vref - A9, A17
+*/
+enum {
+	In1_C = 0,
+	In1_V,
+	In2_C,
+	In2_V,
+	In3_C,
+	In3_V,
+	In4_C,
+	In4_V,
+	Temp_C,
+	In_V,
+	Int_V,
+	Div_V
+};
 
 void interrupt::DMA1_Channel1()
 {
+  u16* adcv = (u16*)dma_adc_buff;
+  register s16 c, v, d;
+
   ++dma_count;
   DMA_ADC1::clearGlobalFlag();
-  DMA_ADC1::disablePeripheral();
-  DMA_ADC1::setNumberOfTransactions(6);
 
+  d = adcv[Div_V];
+
+  c = adcv[In1_C]-d;
+  rms_ch[0] += c*c;
+  v = adcv[In1_V]-d;
+  rms_ch[1] += v*v;
+
+  c = adcv[In2_C]-d;
+  rms_ch[2] += c*c;
+  v = adcv[In2_V]-d;
+  rms_ch[3] += v*v;
+
+  c = adcv[In3_C]-d;
+  rms_ch[4] += c*c;
+  v = adcv[In3_V]-d;
+  rms_ch[5] += v*v;
+
+  c = adcv[In4_C]-d;
+  rms_ch[6] += c*c;
+  v = adcv[In4_V]-d;
+  rms_ch[7] += v*v;
+
+  v = adcv[In_V]-d;
+  rms_ch[8] += v*v;
+
+  DMA_ADC1::disablePeripheral();
+  DMA_ADC1::setNumberOfTransactions(NUM_DMA_ADC);
 }
