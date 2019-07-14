@@ -58,7 +58,7 @@ typedef PB1  VDIV;
 
 typedef DMA1_CHANNEL1 DMA_ADC1;
 
-u64 tick = 0;
+volatile u64 tick = 0;
 
 void initializeGpio()
 {
@@ -163,8 +163,6 @@ void initializeAdc()
   ADC1::enableClock();
   ADC2::enableClock();
 
-  // for(int i = 0; i < 100000; ++i) {}
-
   ADC1::configure(
     adc::cr1::awdch::SET_ANALOG_WATCHDOG_ON_CHANNEL0,
     adc::cr1::eocie::END_OF_CONVERSION_INTERRUPT_DISABLED,
@@ -260,37 +258,79 @@ void initializeAdc()
   ADC1::setRegularSequenceOrder<4, 0>();
   ADC1::setRegularSequenceOrder<5, 16>();
   ADC1::setRegularSequenceOrder<6, 17>();
-  ADC1::setNumberOfRegularChannels<6>();
-  ADC2::setRegularSequenceOrder<1, 9>();
-  ADC2::setRegularSequenceOrder<2, 8>();
-  ADC2::setRegularSequenceOrder<3, 4>();
-  ADC2::setRegularSequenceOrder<4, 5>();
-  ADC2::setRegularSequenceOrder<5, 6>();
-  ADC2::setRegularSequenceOrder<6, 7>();
-  ADC2::setNumberOfRegularChannels<6>();
 
+  ADC1::setNumberOfRegularChannels<6>();
+
+  ADC2::setRegularSequenceOrder<1, 7>();
+  ADC2::setRegularSequenceOrder<2, 6>();
+  ADC2::setRegularSequenceOrder<3, 5>();
+  ADC2::setRegularSequenceOrder<4, 4>();
+  ADC2::setRegularSequenceOrder<5, 9>();
+  ADC2::setRegularSequenceOrder<6, 8>();
+
+  ADC2::setNumberOfRegularChannels<6>();
+  /*
+   ADC2  ADC1
+  ------------
+  In1 V, A - A7, A3
+  In2 V, A - A6, A2
+  In3 V, A - A5, A1
+  In4 V, A - A4, A0
+  VIn V, Temp - A8, A16
+  Vcc/2, Vref - A9, A17
+*/
   ADC1::disablePeripheral();
+  // TODO: replace to usleep()
   for(int i = 0; i < 100000; ++i) {}
   ADC1::enablePeripheral();
   ADC1::resetCalibration();
+  // TODO: Add timeout ??
   while(!ADC1::hasCalibrationInitialized()) {}
   ADC1::startCalibration();
+  // TODO: Add timeout ??
   while(!ADC1::hasCalibrationEnded()) {}
 
   ADC2::disablePeripheral();
+  // TODO: replace to usleep()
   for(int i = 0; i < 100000; ++i) {}
   ADC2::enablePeripheral();
   ADC2::resetCalibration();
+  // TODO: Add timeout ??
   while(!ADC2::hasCalibrationInitialized()) {}
   ADC2::startCalibration();
+  // TODO: Add timeout ??
   while(!ADC2::hasCalibrationEnded()) {}
-
 }
 
 #define NUM_DMA_ADC 6
+#define NUM_V_CH 5
+#define NUM_P_CH 4
+
 volatile u32 dma_count;
-volatile u32 dma_adc_buff[8];
-volatile s64 rms_ch[9];
+volatile u32 dma_adc_buff[NUM_DMA_ADC];
+volatile s64 rms_ch[NUM_V_CH];
+volatile s64 rms_pw[NUM_P_CH];
+volatile s64 energy[NUM_P_CH];
+volatile s16 power[NUM_P_CH];
+volatile u16 voltage[NUM_V_CH];
+
+enum {
+	In1_C = 0,
+	In1_V,
+	In2_C,
+	In2_V,
+	In3_C,
+	In3_V,
+	In4_C,
+	In4_V,
+	Temp_C,
+	Div_V,
+	Int_V,
+	In_V
+};
+
+float kv[] = { 1.0, 1.0, 1.0, 1.0, 1.0 };
+float kp[] = { 1.0, 1.0, 1.0, 1.0 };
 
 void initializeDma()
 {
@@ -323,30 +363,64 @@ void initializePeripherals()
 {
   initializeGpio();
   initializeTimer();
+  initializeI2c();
   initializeUsart1();
   initializeAdc();
   initializeDma();
-  initializeI2c();
 
   TIM2::startCounter();
 }
 
+u16 sqrt32(u32 n)
+{
+  u16 c = 0x8000;
+  u16 g = 0x8000;
+
+  for(;;)
+  {
+    if(g*g > n) g ^= c;
+    c >>= 1;
+    if(c == 0) return g;
+    g |= c;
+  }
+}
 
 void loop()
 {
-  static u64 timer_t1 = 500;
+  static u64 timer_t1 = 1000;
   if(timer_t1 < tick)
   {
+	s64 rms[NUM_V_CH];
+	s64 pw[NUM_P_CH];
+
+	u16 n = (u16)dma_count; dma_count = 0;
+    memcpy(rms, (const void*)rms_ch, sizeof(rms));
+    memcpy(pw, (const void*)rms_pw, sizeof(pw));
+    memset((void*)rms_ch, 0, sizeof(rms_ch));
+    memset((void*)rms_pw, 0, sizeof(rms_pw));
+
+    if(dma_count != 0) printf("Error: DMA Overlap !!!\n");
+
+    voltage[0] = (u16)(sqrt32(rms[0]/n) * kv[0]);
+    voltage[1] = (u16)(sqrt32(rms[1]/n) * kv[1]);
+    voltage[2] = (u16)(sqrt32(rms[2]/n) * kv[2]);
+    voltage[3] = (u16)(sqrt32(rms[3]/n) * kv[3]);
+    voltage[4] = (u16)(sqrt32(rms[4]/n) * kv[4]);
+    power[0] = (s16)(pw[0]/n * kp[0]);
+    power[1] = (s16)(pw[1]/n * kp[1]);
+    power[2] = (s16)(pw[2]/n * kp[2]);
+    power[3] = (s16)(pw[3]/n * kp[3]);
+    energy[0] += power[0];
+    energy[1] += power[1];
+    energy[2] += power[2];
+    energy[3] += power[3];
+
+    printf("Vin: %dv\nV1: %dv\nV2: %dv\nV3: %dv\nV4: %dv\n", voltage[4],
+    		voltage[0], voltage[1], voltage[2], voltage[3]);
+    printf("P1: %dw\nP2: %dw\nP3: %dw\nP4: %dw\n",
+    		power[0], power[1], power[2], power[3]);
     timer_t1 = tick + 500;
     LED::setOutput(LED::isHigh() ? 0 : 1);
-  //printf("Hello !!!\n");
-    printf("ADC: %08x\n0: %08x\n1: %08x\n2: %08x\n3: %08x\n4: %08x\n5: %08x\n", dma_count,
-		  dma_adc_buff[0], dma_adc_buff[1], dma_adc_buff[2], dma_adc_buff[3], dma_adc_buff[4], dma_adc_buff[5]);
-    memset((void*)dma_adc_buff, 0, sizeof(dma_adc_buff));
-
-    DMA_ADC1::enablePeripheral();
-    ADC2::enablePeripheral(); // Start conversion
-    ADC1::enablePeripheral(); // Start conversion
   }
 }
 
@@ -367,6 +441,9 @@ void interrupt::TIM2()
 {
   TIM2::clearUpdateFlag();
   ++tick;
+  DMA_ADC1::enablePeripheral();
+  ADC2::enablePeripheral(); // Start conversion
+  ADC1::enablePeripheral(); // Start conversion
 }
 
 void interrupt::I2C1_EV()
@@ -399,63 +476,35 @@ void interrupt::I2C1_ER()
 {
 
 }
-/*
- ADC2  ADC1
-------------
-In1 V, A - A7, A3
-In2 V, A - A6, A2
-In3 V, A - A5, A1
-In4 V, A - A4, A0
-VIn V, Temp - A8, A16
-Vcc/2, Vref - A9, A17
-*/
-enum {
-	In1_C = 0,
-	In1_V,
-	In2_C,
-	In2_V,
-	In3_C,
-	In3_V,
-	In4_C,
-	In4_V,
-	Temp_C,
-	In_V,
-	Int_V,
-	Div_V
-};
 
 void interrupt::DMA1_Channel1()
 {
   u16* adcv = (u16*)dma_adc_buff;
-  register s16 c, v, d;
+  register s16 v, d;
 
   ++dma_count;
   DMA_ADC1::clearGlobalFlag();
 
   d = adcv[Div_V];
 
-  c = adcv[In1_C]-d;
-  rms_ch[0] += c*c;
   v = adcv[In1_V]-d;
-  rms_ch[1] += v*v;
+  rms_ch[0] += v*v;
+  rms_pw[0] += v * (adcv[In1_C]-d);
 
-  c = adcv[In2_C]-d;
-  rms_ch[2] += c*c;
   v = adcv[In2_V]-d;
-  rms_ch[3] += v*v;
+  rms_ch[1] += v*v;
+  rms_pw[1] += v * (adcv[In2_C]-d);
 
-  c = adcv[In3_C]-d;
-  rms_ch[4] += c*c;
   v = adcv[In3_V]-d;
-  rms_ch[5] += v*v;
+  rms_ch[2] += v*v;
+  rms_pw[2] += v * (adcv[In3_C]-d);
 
-  c = adcv[In4_C]-d;
-  rms_ch[6] += c*c;
   v = adcv[In4_V]-d;
-  rms_ch[7] += v*v;
+  rms_ch[3] += v*v;
+  rms_pw[3] += v * (adcv[In4_C]-d);
 
   v = adcv[In_V]-d;
-  rms_ch[8] += v*v;
+  rms_ch[4] += v*v;
 
   DMA_ADC1::disablePeripheral();
   DMA_ADC1::setNumberOfTransactions(NUM_DMA_ADC);
