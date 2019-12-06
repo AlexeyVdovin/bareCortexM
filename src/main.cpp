@@ -35,24 +35,19 @@
 #include "peripheral/i2c.hpp"
 
 #define UART1_BAUD_RATE 115200
-#define I2C_SLAVE_ADDR  0x50
+#define I2C_SLAVE_ADDR  0x10
 
 typedef PA9  U1TX;
 typedef PA10 U1RX;
-typedef PB9  LED;
+typedef PB8  LED_RED;
+typedef PB9  LED_GREEN;
 
 
-typedef PA0  IN4C;
-typedef PA1  IN3C;
-typedef PA2  IN2C;
-typedef PA3  IN1C;
-typedef PA4  IN4V;
-typedef PA5  IN3V;
-typedef PA6  IN2V;
-typedef PA7  IN1V;
-
-typedef PB0  VIN;
-typedef PB1  VDIV;
+typedef PA0  AD_12V;
+typedef PA1  AD_BTT;
+typedef PA2  AD_5V0;
+typedef PA3  AD_3V3;
+typedef PB1  AD_VCC;
 
 
 
@@ -69,17 +64,12 @@ void initializeGpio()
 
   AFIO::enableClock();
 
-  LED::setMode(gpio::cr::GP_PUSH_PULL_2MHZ);
-  IN1C::setMode(gpio::cr::ANALOG_INPUT);
-  IN1V::setMode(gpio::cr::ANALOG_INPUT);
-  IN2C::setMode(gpio::cr::ANALOG_INPUT);
-  IN2V::setMode(gpio::cr::ANALOG_INPUT);
-  IN3C::setMode(gpio::cr::ANALOG_INPUT);
-  IN3V::setMode(gpio::cr::ANALOG_INPUT);
-  IN4C::setMode(gpio::cr::ANALOG_INPUT);
-  IN4V::setMode(gpio::cr::ANALOG_INPUT);
-  VIN::setMode(gpio::cr::ANALOG_INPUT);
-  VDIV::setMode(gpio::cr::ANALOG_INPUT);
+  LED_RED::setMode(gpio::cr::GP_PUSH_PULL_2MHZ);
+  PA0::setMode(gpio::cr::ANALOG_INPUT);
+  PA1::setMode(gpio::cr::ANALOG_INPUT);
+  PA2::setMode(gpio::cr::ANALOG_INPUT);
+  PA3::setMode(gpio::cr::ANALOG_INPUT);
+  PB1::setMode(gpio::cr::ANALOG_INPUT);
 }
 
 void initializeUsart1()
@@ -156,9 +146,6 @@ In3 V, A - A5, A1
 In4 V, A - A4, A0
 VIn V, Temp - A8, A16
 Vcc/2, Vref - A9, A17
-
-- accumulate sum of V*V and number of samples
-- every second divide accumulated value by number of samples and get SQRT of it.
 */
 void initializeAdc()
 {
@@ -271,16 +258,7 @@ void initializeAdc()
   ADC2::setRegularSequenceOrder<6, 8>();
 
   ADC2::setNumberOfRegularChannels<6>();
-  /*
-   ADC2  ADC1
-  ------------
-  In1 V, A - A7, A3
-  In2 V, A - A6, A2
-  In3 V, A - A5, A1
-  In4 V, A - A4, A0
-  VIn V, Temp - A8, A16
-  Vcc/2, Vref - A9, A17
-*/
+
   ADC1::disablePeripheral();
   // TODO: replace to usleep()
   for(int i = 0; i < 100000; ++i) {}
@@ -305,40 +283,14 @@ void initializeAdc()
 }
 
 #define NUM_DMA_ADC 6
-#define NUM_V_CH 5
-#define NUM_P_CH 4
 
 volatile u32 dma_count;
 volatile u32 dma_adc_buff[NUM_DMA_ADC];
-volatile s64 rms_ch[NUM_V_CH];
-volatile s64 rms_pw[NUM_P_CH];
-volatile s64 energy[NUM_P_CH];
-volatile s16 power[NUM_P_CH];
-volatile u16 voltage[NUM_V_CH];
-
-enum {
-	In1_C = 0,
-	In1_V,
-	In2_C,
-	In2_V,
-	In3_C,
-	In3_V,
-	In4_C,
-	In4_V,
-	Temp_C,
-	Div_V,
-	Int_V,
-	In_V
-};
-
-float kv[] = { 1.0, 1.0, 1.0, 1.0, 1.0 };
-float kp[] = { 1.0, 1.0, 1.0, 1.0 };
 
 void initializeDma()
 {
   dma_count = 0;
   memset((void*)dma_adc_buff, 0, sizeof(dma_adc_buff));
-  memset((void*)rms_ch, 0, sizeof(rms_ch));
 
   DMA_ADC1::enableClock();
   DMA_ADC1::configure(
@@ -392,37 +344,12 @@ void loop()
   static u64 timer_t1 = 1000;
   if(timer_t1 < tick)
   {
-	s64 rms[NUM_V_CH];
-	s64 pw[NUM_P_CH];
-
 	u16 n = (u16)dma_count; dma_count = 0;
-    memcpy(rms, (const void*)rms_ch, sizeof(rms));
-    memcpy(pw, (const void*)rms_pw, sizeof(pw));
-    memset((void*)rms_ch, 0, sizeof(rms_ch));
-    memset((void*)rms_pw, 0, sizeof(rms_pw));
 
     if(dma_count != 0) printf("Error: DMA Overlap !!!\n");
 
-    voltage[0] = (u16)(sqrt32(rms[0]/n) * kv[0]);
-    voltage[1] = (u16)(sqrt32(rms[1]/n) * kv[1]);
-    voltage[2] = (u16)(sqrt32(rms[2]/n) * kv[2]);
-    voltage[3] = (u16)(sqrt32(rms[3]/n) * kv[3]);
-    voltage[4] = (u16)(sqrt32(rms[4]/n) * kv[4]);
-    power[0] = (s16)(pw[0]/n * kp[0]);
-    power[1] = (s16)(pw[1]/n * kp[1]);
-    power[2] = (s16)(pw[2]/n * kp[2]);
-    power[3] = (s16)(pw[3]/n * kp[3]);
-    energy[0] += power[0];
-    energy[1] += power[1];
-    energy[2] += power[2];
-    energy[3] += power[3];
-
-    printf("Vin: %dv\nV1: %dv\nV2: %dv\nV3: %dv\nV4: %dv\n", voltage[4],
-    		voltage[0], voltage[1], voltage[2], voltage[3]);
-    printf("P1: %dw\nP2: %dw\nP3: %dw\nP4: %dw\n",
-    		power[0], power[1], power[2], power[3]);
     timer_t1 = tick + 500;
-    LED::setOutput(LED::isHigh() ? 0 : 1);
+    LED_RED::setOutput(LED_RED::isHigh() ? 0 : 1);
   }
 }
 
@@ -432,7 +359,7 @@ int main()
 
   initializePeripherals();
 
-  LED::setHigh();
+  LED_RED::setHigh();
 
   while (true) {
     loop();
@@ -469,22 +396,11 @@ enum
   I2C_SLAVE_READ_DATA
 };
 
-typedef struct
-{
-	u64 tick;
-	s64 energy[NUM_P_CH];
-	s16 power[NUM_P_CH];
-	u16 voltage[NUM_V_CH];
-} regs_t;
-
 
 void interrupt::I2C1_EV()
 {
 	static int mode = I2C_IDLE;
-	static regs_t regs;
 	static u8 addr = 0;
-	u8* reg = (u8*)&regs;
-
 
 	if(I2C1::isAddrMatched())
 	{
@@ -503,17 +419,10 @@ void interrupt::I2C1_EV()
 		{
 			addr = I2C1::getData();
 			mode = I2C_SLAVE_WRITE_DATA;
-			if(addr == 0)
-			{
-				regs.tick = tick;
-				memcpy(regs.energy, (const void*)energy, sizeof(regs.energy));
-				memcpy(regs.power, (const void*)power, sizeof(regs.power));
-				memcpy(regs.voltage, (const void*)voltage, sizeof(regs.voltage));
-			}
 		}
 		else if(mode == I2C_SLAVE_WRITE_DATA)
 		{
-			reg[addr++] = I2C1::getData();
+			I2C1::getData();
 		}
 		else
 		{
@@ -525,7 +434,7 @@ void interrupt::I2C1_EV()
 	{
 		if(mode == I2C_SLAVE_READ_DATA)
 		{
-			I2C1::sendData(reg[addr++]);
+			I2C1::sendData(0xac);
 		}
 		else
 		{
@@ -563,27 +472,6 @@ void interrupt::DMA1_Channel1()
 
   ++dma_count;
   DMA_ADC1::clearGlobalFlag();
-
-  d = adcv[Div_V];
-
-  v = adcv[In1_V]-d;
-  rms_ch[0] += v*v;
-  rms_pw[0] += v * (adcv[In1_C]-d);
-
-  v = adcv[In2_V]-d;
-  rms_ch[1] += v*v;
-  rms_pw[1] += v * (adcv[In2_C]-d);
-
-  v = adcv[In3_V]-d;
-  rms_ch[2] += v*v;
-  rms_pw[2] += v * (adcv[In3_C]-d);
-
-  v = adcv[In4_V]-d;
-  rms_ch[3] += v*v;
-  rms_pw[3] += v * (adcv[In4_C]-d);
-
-  v = adcv[In_V]-d;
-  rms_ch[4] += v*v;
 
   DMA_ADC1::disablePeripheral();
   DMA_ADC1::setNumberOfTransactions(NUM_DMA_ADC);
