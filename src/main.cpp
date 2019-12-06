@@ -59,6 +59,7 @@ typedef PB1  VDIV;
 typedef DMA1_CHANNEL1 DMA_ADC1;
 
 volatile u64 tick = 0;
+volatile u64 i2c1_wd = 0;
 
 void initializeGpio()
 {
@@ -123,6 +124,7 @@ void initializeTimer()
 
 void initializeI2c()
 {
+  i2c1_wd = 0;
   I2C1::enableClock(); // Uses APB1 clock
   I2C1::configure(
     i2c::cr1::pe::PERIPHERAL_DISABLED,
@@ -434,39 +436,106 @@ int main()
 
   while (true) {
     loop();
+    if(i2c1_wd != 0 && i2c1_wd < tick)
+    {
+    	I2C1::disablePeripheral();
+    	I2C1::reset();
+    	initializeI2c();
+    	printf("Reset I2C!\n");
+    }
   }
 }
 
-void interrupt::TIM2()
+/*
+ * I2C interrupts should have the highest priority in the application
+ * in order to make them uninterruptible.
+ *
+ * After checking the SR1 register content, the user should perform the complete clearing sequence
+ * for each flag found set.
+ * Thus, for ADDR and STOPF flags, the following sequence is required inside the I2C interrupt
+ * routine:
+ *   READ SR1
+ *   if (ADDR == 1) {READ SR1; READ SR2}
+ *   if (STOPF == 1) {READ SR1; WRITE CR1}
+ *
+ * The purpose is to make sure that both ADDR and STOPF flags are cleared if both are found set.
+ */
+
+enum
 {
-  TIM2::clearUpdateFlag();
-  ++tick;
-  DMA_ADC1::enablePeripheral();
-  ADC2::enablePeripheral(); // Start conversion
-  ADC1::enablePeripheral(); // Start conversion
-}
+  I2C_IDLE = 0,
+  I2C_SLAVE_WRITE_ADDR,
+  I2C_SLAVE_WRITE_DATA,
+  I2C_SLAVE_READ_DATA
+};
+
+typedef struct
+{
+	u64 tick;
+	s64 energy[NUM_P_CH];
+	s16 power[NUM_P_CH];
+	u16 voltage[NUM_V_CH];
+} regs_t;
+
 
 void interrupt::I2C1_EV()
 {
+	static int mode = I2C_IDLE;
+	static regs_t regs;
+	static u8 addr = 0;
+	u8* reg = (u8*)&regs;
+
+
 	if(I2C1::isAddrMatched())
 	{
-
-
+		i2c1_wd = tick+3000;
+		mode = I2C1::isSlaveTransmitting() ? I2C_SLAVE_READ_DATA : I2C_SLAVE_WRITE_ADDR;
 	}
 	else if(I2C1::isStopReceived())
 	{
-
-
+		mode = I2C_IDLE;
+		I2C1::enablePeripheral();
+		i2c1_wd = 0;
 	}
 	else if(I2C1::hasReceivedData())
 	{
-
-
+		if(mode == I2C_SLAVE_WRITE_ADDR)
+		{
+			addr = I2C1::getData();
+			mode = I2C_SLAVE_WRITE_DATA;
+			if(addr == 0)
+			{
+				regs.tick = tick;
+				memcpy(regs.energy, (const void*)energy, sizeof(regs.energy));
+				memcpy(regs.power, (const void*)power, sizeof(regs.power));
+				memcpy(regs.voltage, (const void*)voltage, sizeof(regs.voltage));
+			}
+		}
+		else if(mode == I2C_SLAVE_WRITE_DATA)
+		{
+			reg[addr++] = I2C1::getData();
+		}
+		else
+		{
+			// Incorrect state, ignore data
+			I2C1::getData();
+		}
 	}
 	else if(I2C1::canSendData())
 	{
-
-
+		if(mode == I2C_SLAVE_READ_DATA)
+		{
+			I2C1::sendData(reg[addr++]);
+		}
+		else
+		{
+			// Incorrect state, send bad data
+			I2C1::sendData(0xbd);
+		}
+	}
+	else if(I2C1::isNakReceived())
+	{
+		I2C1::clearNAK();
 	}
 
 
@@ -475,6 +544,16 @@ void interrupt::I2C1_EV()
 void interrupt::I2C1_ER()
 {
 
+}
+
+
+void interrupt::TIM2()
+{
+  TIM2::clearUpdateFlag();
+  ++tick;
+  DMA_ADC1::enablePeripheral();
+  ADC2::enablePeripheral(); // Start conversion
+  ADC1::enablePeripheral(); // Start conversion
 }
 
 void interrupt::DMA1_Channel1()
