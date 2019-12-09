@@ -33,6 +33,7 @@
 #include "peripheral/dma.hpp"
 #include "peripheral/tim.hpp"
 #include "peripheral/i2c.hpp"
+#include "core/stk.hpp"
 
 #define UART1_BAUD_RATE 115200
 #define I2C_SLAVE_ADDR  0x10
@@ -51,6 +52,8 @@ typedef PB1  AD_VCC;  // IN9
 //           AD_TEMP; // IN16
 //           AD_REF;  // IN17
 
+typedef DMA1_CHANNEL1 DMA_ADC1;
+
 enum { NUM_DMA_ADC = 7 };
 
 volatile u32 dma_count;
@@ -63,8 +66,8 @@ volatile u64 systick = 0;
 
 void delay(u32 us)
 {
-    int i, t = us*AHB_CLOCK_MHZ;
-    for(i=0; i<t; ++i;)
+    u32 i, t = us*(clk::AHB/1000/1000);
+    for(i=0; i<t; ++i)
         __asm__("nop");
 }
 
@@ -77,6 +80,7 @@ void initializeGpio()
   AFIO::enableClock();
 
   LED_RED::setMode(gpio::cr::GP_PUSH_PULL_2MHZ);
+  LED_GREEN::setMode(gpio::cr::GP_PUSH_PULL_2MHZ);
   PA0::setMode(gpio::cr::ANALOG_INPUT);
   PA1::setMode(gpio::cr::ANALOG_INPUT);
   PA2::setMode(gpio::cr::ANALOG_INPUT);
@@ -405,7 +409,7 @@ void interrupt::DMA1_Channel1()
   DMA_ADC1::setNumberOfTransactions(NUM_DMA_ADC);
 }
 
-void SysTick()
+extern "C" void SysTick()
 {
   ++systick;
   LED_GREEN::setOutput(LED_GREEN::isHigh() ? 0 : 1);
