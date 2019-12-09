@@ -43,18 +43,30 @@ typedef PB8  LED_RED;
 typedef PB9  LED_GREEN;
 
 
-typedef PA0  AD_12V;
-typedef PA1  AD_BTT;
-typedef PA2  AD_5V0;
-typedef PA3  AD_3V3;
-typedef PB1  AD_VCC;
+typedef PA0  AD_12V;  // IN0
+typedef PA1  AD_BTT;  // IN1
+typedef PA2  AD_5V0;  // IN2
+typedef PA3  AD_3V3;  // IN3
+typedef PB1  AD_VCC;  // IN9
+//           AD_TEMP; // IN16
+//           AD_REF;  // IN17
 
+enum { NUM_DMA_ADC = 7 };
 
-
-typedef DMA1_CHANNEL1 DMA_ADC1;
+volatile u32 dma_count;
+volatile u16 dma_adc_buff[NUM_DMA_ADC];
 
 volatile u64 tick = 0;
 volatile u64 i2c1_wd = 0;
+
+volatile u64 systick = 0;
+
+void delay(u32 us)
+{
+    int i, t = us*AHB_CLOCK_MHZ;
+    for(i=0; i<t; ++i;)
+        __asm__("nop");
+}
 
 void initializeGpio()
 {
@@ -109,7 +121,8 @@ void initializeTimer()
 {
 	// TODO: Switch to SysTimer
   TIM2::enableClock();
-  TIM2::configurePeriodicInterrupt< 1000 /* Hz */ >();
+  TIM2::configurePeriodicInterrupt< 1000 /*Hz*/>();
+  STK::configurePeriodicInterrupt(20 /*Hz*/);
 }
 
 void initializeI2c()
@@ -126,10 +139,7 @@ void initializeI2c()
     i2c::cr2::itbufen::BUFFER_INTERRUPT_ENABLED,
     i2c::cr2::dmaen::DMA_REQUEST_DISABLED,
     i2c::cr2::last::NEXT_DMA_IS_NOT_THE_LAST_TRANSFER);
-  I2C1::configureClock<
-    i2c::ccr::f_s::STANDARD_MODE,
-    i2c::ccr::duty::T_LOW_2_T_HIGH_1,
-    100000 /* Hz */ >();
+  I2C1::configureClock<i2c::ccr::f_s::STANDARD_MODE, i2c::ccr::duty::T_LOW_2_T_HIGH_1, 100000 /*Hz*/>();
   I2C1::setSlaveAddr1(I2C_SLAVE_ADDR);
   I2C1::setSlaveAddr2(0);
   I2C1::enablePeripheral();
@@ -137,47 +147,11 @@ void initializeI2c()
   I2C1::unmaskInterrupts();
 }
 
-/*
- ADC2  ADC1
-------------
-In1 V, A - A7, A3
-In2 V, A - A6, A2
-In3 V, A - A5, A1
-In4 V, A - A4, A0
-VIn V, Temp - A8, A16
-Vcc/2, Vref - A9, A17
-*/
 void initializeAdc()
 {
   ADC1::enableClock();
-  ADC2::enableClock();
 
   ADC1::configure(
-    adc::cr1::awdch::SET_ANALOG_WATCHDOG_ON_CHANNEL0,
-    adc::cr1::eocie::END_OF_CONVERSION_INTERRUPT_DISABLED,
-    adc::cr1::awdie::ANALOG_WATCHDOG_INTERRUPT_DISABLED,
-    adc::cr1::jeocie::END_OF_ALL_INJECTED_CONVERSIONS_INTERRUPT_DISABLED,
-    adc::cr1::scan::SCAN_MODE_ENABLED,
-    adc::cr1::awdsgl::ANALOG_WATCHDOG_ENABLED_ON_ALL_CHANNELS,
-    adc::cr1::jauto::AUTOMATIC_INJECTED_CONVERSION_DISABLED,
-    adc::cr1::discen::DISCONTINUOUS_MODE_ON_REGULAR_CHANNELS_DISABLED,
-    adc::cr1::jdiscen::DISCONTINUOUS_MODE_ON_INJECTED_CHANNELS_DISABLED,
-    adc::cr1::discnum::_1_CHANNEL_FOR_DISCONTINUOUS_MODE,
-    adc::cr1::dualmod::DUALMODE_REGSIMULT_MODE,
-    adc::cr1::jawden::ANALOG_WATCHDOG_DISABLED_ON_INJECTED_CHANNELS,
-    adc::cr1::awden::ANALOG_WATCHDOG_DISABLED_ON_REGULAR_CHANNELS,
-    adc::cr2::adon::ADC_ENABLED,
-    adc::cr2::cont::SINGLE_CONVERSION_MODE,
-    adc::cr2::dma::DMA_MODE_ENABLED,
-    adc::cr2::align::RIGTH_ALIGNED_DATA,
-    adc::cr2::jextsel::INJECTED_GROUP_TRIGGERED_BY_TIMER1_TRGO,
-    adc::cr2::jexten::INJECTED_TRIGGER_DISABLED,
-    adc::cr2::jswstart::INJECTED_CHANNELS_ON_RESET_STATE,
-    adc::cr2::extsel::REGULAR_GROUP_TRIGGERED_BY_SWSTART,
-    adc::cr2::exten::REGULAR_TRIGGER_ENABLED,
-    adc::cr2::swstart::START_CONVERSION_ON_REGULAR_CHANNELS,
-    adc::cr2::tsvrefe::TEMPERATURE_SENSOR_ENABLED);
-  ADC2::configure(
     adc::cr1::awdch::SET_ANALOG_WATCHDOG_ON_CHANNEL0,
     adc::cr1::eocie::END_OF_CONVERSION_INTERRUPT_DISABLED,
     adc::cr1::awdie::ANALOG_WATCHDOG_INTERRUPT_DISABLED,
@@ -193,9 +167,9 @@ void initializeAdc()
     adc::cr1::awden::ANALOG_WATCHDOG_DISABLED_ON_REGULAR_CHANNELS,
     adc::cr2::adon::ADC_ENABLED,
     adc::cr2::cont::SINGLE_CONVERSION_MODE,
-    adc::cr2::dma::DMA_MODE_DISABLED,
+    adc::cr2::dma::DMA_MODE_ENABLED,
     adc::cr2::align::RIGTH_ALIGNED_DATA,
-    adc::cr2::jextsel::INJECTED_GROUP_TRIGGERED_BY_TIMER1_CC4,
+    adc::cr2::jextsel::INJECTED_GROUP_TRIGGERED_BY_TIMER1_TRGO,
     adc::cr2::jexten::INJECTED_TRIGGER_DISABLED,
     adc::cr2::jswstart::INJECTED_CHANNELS_ON_RESET_STATE,
     adc::cr2::extsel::REGULAR_GROUP_TRIGGERED_BY_SWSTART,
@@ -222,70 +196,24 @@ void initializeAdc()
   ADC1::setConversionTime<16, adc::smp::SAMPLING_TIME_13_5_CYCLES>();
   ADC1::setConversionTime<17, adc::smp::SAMPLING_TIME_13_5_CYCLES>();
 
-  ADC2::setConversionTime<0, adc::smp::SAMPLING_TIME_13_5_CYCLES>();
-  ADC2::setConversionTime<1, adc::smp::SAMPLING_TIME_13_5_CYCLES>();
-  ADC2::setConversionTime<2, adc::smp::SAMPLING_TIME_13_5_CYCLES>();
-  ADC2::setConversionTime<3, adc::smp::SAMPLING_TIME_13_5_CYCLES>();
-  ADC2::setConversionTime<4, adc::smp::SAMPLING_TIME_13_5_CYCLES>();
-  ADC2::setConversionTime<5, adc::smp::SAMPLING_TIME_13_5_CYCLES>();
-  ADC2::setConversionTime<6, adc::smp::SAMPLING_TIME_13_5_CYCLES>();
-  ADC2::setConversionTime<7, adc::smp::SAMPLING_TIME_13_5_CYCLES>();
-  ADC2::setConversionTime<8, adc::smp::SAMPLING_TIME_13_5_CYCLES>();
-  ADC2::setConversionTime<9, adc::smp::SAMPLING_TIME_13_5_CYCLES>();
-  ADC2::setConversionTime<10, adc::smp::SAMPLING_TIME_13_5_CYCLES>();
-  ADC2::setConversionTime<11, adc::smp::SAMPLING_TIME_13_5_CYCLES>();
-  ADC2::setConversionTime<12, adc::smp::SAMPLING_TIME_13_5_CYCLES>();
-  ADC2::setConversionTime<13, adc::smp::SAMPLING_TIME_13_5_CYCLES>();
-  ADC2::setConversionTime<14, adc::smp::SAMPLING_TIME_13_5_CYCLES>();
-  ADC2::setConversionTime<15, adc::smp::SAMPLING_TIME_13_5_CYCLES>();
-  ADC2::setConversionTime<16, adc::smp::SAMPLING_TIME_13_5_CYCLES>();
-  ADC2::setConversionTime<17, adc::smp::SAMPLING_TIME_13_5_CYCLES>();
+  ADC1::setRegularSequenceOrder<1, 0>();  // AD_12V
+  ADC1::setRegularSequenceOrder<2, 1>();  // AD_BTT
+  ADC1::setRegularSequenceOrder<3, 2>();  // AD_5V0
+  ADC1::setRegularSequenceOrder<4, 3>();  // AD_3V3
+  ADC1::setRegularSequenceOrder<5, 9>();  // AD_VCC
+  ADC1::setRegularSequenceOrder<6, 16>(); // AD_TEMP
+  ADC1::setRegularSequenceOrder<7, 17>(); // AD_REF
 
-  ADC1::setRegularSequenceOrder<1, 3>();
-  ADC1::setRegularSequenceOrder<2, 2>();
-  ADC1::setRegularSequenceOrder<3, 1>();
-  ADC1::setRegularSequenceOrder<4, 0>();
-  ADC1::setRegularSequenceOrder<5, 16>();
-  ADC1::setRegularSequenceOrder<6, 17>();
-
-  ADC1::setNumberOfRegularChannels<6>();
-
-  ADC2::setRegularSequenceOrder<1, 7>();
-  ADC2::setRegularSequenceOrder<2, 6>();
-  ADC2::setRegularSequenceOrder<3, 5>();
-  ADC2::setRegularSequenceOrder<4, 4>();
-  ADC2::setRegularSequenceOrder<5, 9>();
-  ADC2::setRegularSequenceOrder<6, 8>();
-
-  ADC2::setNumberOfRegularChannels<6>();
+  ADC1::setNumberOfRegularChannels<NUM_DMA_ADC>();
 
   ADC1::disablePeripheral();
-  // TODO: replace to usleep()
-  for(int i = 0; i < 100000; ++i) {}
+  delay(10);
   ADC1::enablePeripheral();
   ADC1::resetCalibration();
-  // TODO: Add timeout ??
-  while(!ADC1::hasCalibrationInitialized()) {}
+  while(!ADC1::hasCalibrationInitialized()) delay(10); 
   ADC1::startCalibration();
-  // TODO: Add timeout ??
-  while(!ADC1::hasCalibrationEnded()) {}
-
-  ADC2::disablePeripheral();
-  // TODO: replace to usleep()
-  for(int i = 0; i < 100000; ++i) {}
-  ADC2::enablePeripheral();
-  ADC2::resetCalibration();
-  // TODO: Add timeout ??
-  while(!ADC2::hasCalibrationInitialized()) {}
-  ADC2::startCalibration();
-  // TODO: Add timeout ??
-  while(!ADC2::hasCalibrationEnded()) {}
+  while(!ADC1::hasCalibrationEnded()) delay(10);
 }
-
-#define NUM_DMA_ADC 6
-
-volatile u32 dma_count;
-volatile u32 dma_adc_buff[NUM_DMA_ADC];
 
 void initializeDma()
 {
@@ -301,8 +229,8 @@ void initializeDma()
       dma::channel::cr::circ::CIRCULAR_MODE_DISABLED,
       dma::channel::cr::pinc::PERIPHERAL_INCREMENT_MODE_DISABLED,
       dma::channel::cr::minc::MEMORY_INCREMENT_MODE_ENABLED,
-      dma::channel::cr::psize::PERIPHERAL_SIZE_32BITS,
-      dma::channel::cr::msize::MEMORY_SIZE_32BITS,
+      dma::channel::cr::psize::PERIPHERAL_SIZE_16BITS,
+      dma::channel::cr::msize::MEMORY_SIZE_16BITS,
       dma::channel::cr::pl::CHANNEL_PRIORITY_LEVEL_LOW,
       dma::channel::cr::mem2mem::MEMORY_TO_MEMORY_MODE_DISABLED);
   DMA_ADC1::setMemoryAddress((void*)dma_adc_buff);
@@ -345,6 +273,9 @@ void loop()
   if(timer_t1 < tick)
   {
 	u16 n = (u16)dma_count; dma_count = 0;
+
+    // Take data from DMA buffer.
+
 
     if(dma_count != 0) printf("Error: DMA Overlap !!!\n");
 
@@ -461,18 +392,21 @@ void interrupt::TIM2()
   TIM2::clearUpdateFlag();
   ++tick;
   DMA_ADC1::enablePeripheral();
-  ADC2::enablePeripheral(); // Start conversion
-  ADC1::enablePeripheral(); // Start conversion
+  // Start conversion
+  ADC1::enablePeripheral();
 }
 
 void interrupt::DMA1_Channel1()
 {
-  u16* adcv = (u16*)dma_adc_buff;
-  register s16 v, d;
-
   ++dma_count;
   DMA_ADC1::clearGlobalFlag();
 
   DMA_ADC1::disablePeripheral();
   DMA_ADC1::setNumberOfTransactions(NUM_DMA_ADC);
+}
+
+void SysTick()
+{
+  ++systick;
+  LED_GREEN::setOutput(LED_GREEN::isHigh() ? 0 : 1);
 }
