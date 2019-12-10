@@ -51,8 +51,8 @@ typedef PB1  AD_VCC;  // IN9
 
 typedef DMA1_CHANNEL1 DMA_ADC1;
 
-typedef PA9   U1TX    // PP
-typedef PA10  U1RX    // IN
+typedef PA9   U1TX;   // PP
+typedef PA10  U1RX;   // IN
 
 typedef PB6   SCL;    // OD
 typedef PB7   SDA;    // OD
@@ -68,7 +68,7 @@ typedef struct
 {
   u64 tick;     // 0x00
   u32 status;   // 0x08
-  u16 control   // 0x0a
+  u16 control;  // 0x0a
   s16 adc_12v;  // 0x0c
   s16 adc_btt;  // 0x0e
   s16 adc_5v0;  // 0x10
@@ -106,7 +106,10 @@ void initializeGpio()
   GPIOA::enableClock();
   GPIOB::enableClock();
 
+  LED_RED::setHigh();
   LED_RED::setMode(gpio::cr::GP_PUSH_PULL_2MHZ);
+
+  LED_GREEN::setHigh();
   LED_GREEN::setMode(gpio::cr::GP_PUSH_PULL_2MHZ);
 
   OPT_EN::setMode(gpio::cr::GP_PUSH_PULL_2MHZ);
@@ -162,7 +165,7 @@ void initializeTimer()
 {
   // ADC/DMA periodic timer
   TIM2::enableClock();
-  TIM2::configurePeriodicInterrupt< 100 /*Hz*/>();
+  TIM2::configurePeriodicInterrupt<100 /*Hz*/>();
 
   // Sys Clock
   STK::configurePeriodicInterrupt(1000 /*Hz*/);
@@ -337,7 +340,7 @@ int main()
 
   initializePeripherals();
 
-  LED_RED::setHigh();
+
 
   while (true) {
     loop();
