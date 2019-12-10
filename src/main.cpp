@@ -35,14 +35,11 @@
 #include "peripheral/i2c.hpp"
 #include "core/stk.hpp"
 
-#define UART1_BAUD_RATE 115200
+#define UART1_BAUD_RATE 9600
 #define I2C_SLAVE_ADDR  0x10
 
-typedef PA9  U1TX;
-typedef PA10 U1RX;
 typedef PB8  LED_RED;
 typedef PB9  LED_GREEN;
-
 
 typedef PA0  AD_12V;  // IN0
 typedef PA1  AD_BTT;  // IN1
@@ -54,6 +51,39 @@ typedef PB1  AD_VCC;  // IN9
 
 typedef DMA1_CHANNEL1 DMA_ADC1;
 
+typedef PA9   U1TX    // PP
+typedef PA10  U1RX    // IN
+
+typedef PB6   SCL;    // OD
+typedef PB7   SDA;    // OD
+
+typedef PA15  OPT_V;  // IN
+typedef PB13  PA07;   // OD
+typedef PB3   INTB;   // IN
+typedef PB4   EXT_RST;// OD
+typedef PB5   OPT_EN; // PP
+typedef PB15  PWR_EN; // OD
+
+typedef struct
+{
+  u64 tick;     // 0x00
+  u32 status;   // 0x08
+  u16 control   // 0x0a
+  s16 adc_12v;  // 0x0c
+  s16 adc_btt;  // 0x0e
+  s16 adc_5v0;  // 0x10
+  s16 adc_3v3;  // 0x12
+  s16 adc_vcc;  // 0x14
+  s16 adc_ref;  // 0x16
+  s16 adc_temp; // 0x18
+  u16 res1;     // 0x1a
+  u16 res2;     // 0x1c
+  u16 res3;     // 0x1e
+  u16 nv_adr;   // 0x20
+  u16 nv_cmd;   // 0x22
+  u16 nv_data;  // 0x24
+} REGS;
+
 enum { NUM_DMA_ADC = 7 };
 
 volatile u32 dma_count;
@@ -62,30 +92,37 @@ volatile u16 dma_adc_buff[NUM_DMA_ADC];
 volatile u64 tick = 0;
 volatile u64 i2c1_wd = 0;
 
-volatile u64 systick = 0;
+volatile REGS regs;
 
 void delay(u32 us)
 {
-    u32 i, t = us*(clk::AHB/1000/1000);
-    for(i=0; i<t; ++i)
-        __asm__("nop");
+  u32 i, t = us*(clk::AHB/1000/1000);
+  for(i=0; i<t; ++i)
+    __asm__("nop");
 }
 
 void initializeGpio()
 {
   GPIOA::enableClock();
   GPIOB::enableClock();
-  GPIOC::enableClock();
-
-  AFIO::enableClock();
 
   LED_RED::setMode(gpio::cr::GP_PUSH_PULL_2MHZ);
   LED_GREEN::setMode(gpio::cr::GP_PUSH_PULL_2MHZ);
-  PA0::setMode(gpio::cr::ANALOG_INPUT);
-  PA1::setMode(gpio::cr::ANALOG_INPUT);
-  PA2::setMode(gpio::cr::ANALOG_INPUT);
-  PA3::setMode(gpio::cr::ANALOG_INPUT);
-  PB1::setMode(gpio::cr::ANALOG_INPUT);
+
+  OPT_EN::setMode(gpio::cr::GP_PUSH_PULL_2MHZ);
+  OPT_EN::setLow();
+
+  PA07::setHigh();
+  PA07::setMode(gpio::cr::GP_OPEN_DRAIN_2MHZ);
+
+  EXT_RST::setHigh();
+  EXT_RST::setMode(gpio::cr::GP_OPEN_DRAIN_2MHZ);
+
+  PWR_EN::setHigh();
+  PWR_EN::setMode(gpio::cr::GP_OPEN_DRAIN_2MHZ);
+
+  INTB::setMode(gpio::cr::FLOATING_INPUT);
+  OPT_V::setMode(gpio::cr::FLOATING_INPUT);
 }
 
 void initializeUsart1()
@@ -123,10 +160,12 @@ void initializeUsart1()
 
 void initializeTimer()
 {
-	// TODO: Switch to SysTimer
+  // ADC/DMA periodic timer
   TIM2::enableClock();
-  TIM2::configurePeriodicInterrupt< 1000 /*Hz*/>();
-  STK::configurePeriodicInterrupt(20 /*Hz*/);
+  TIM2::configurePeriodicInterrupt< 100 /*Hz*/>();
+
+  // Sys Clock
+  STK::configurePeriodicInterrupt(1000 /*Hz*/);
 }
 
 void initializeI2c()
@@ -146,15 +185,17 @@ void initializeI2c()
   I2C1::configureClock<i2c::ccr::f_s::STANDARD_MODE, i2c::ccr::duty::T_LOW_2_T_HIGH_1, 100000 /*Hz*/>();
   I2C1::setSlaveAddr1(I2C_SLAVE_ADDR);
   I2C1::setSlaveAddr2(0);
-  I2C1::enablePeripheral();
 
+  SCL::setMode(gpio::cr::AF_OPEN_DRAIN_2MHZ);
+  SDA::setMode(gpio::cr::AF_OPEN_DRAIN_2MHZ);
+
+  I2C1::enablePeripheral();
   I2C1::unmaskInterrupts();
 }
 
 void initializeAdc()
 {
   ADC1::enableClock();
-
   ADC1::configure(
     adc::cr1::awdch::SET_ANALOG_WATCHDOG_ON_CHANNEL0,
     adc::cr1::eocie::END_OF_CONVERSION_INTERRUPT_DISABLED,
@@ -181,24 +222,24 @@ void initializeAdc()
     adc::cr2::swstart::START_CONVERSION_ON_REGULAR_CHANNELS,
     adc::cr2::tsvrefe::TEMPERATURE_SENSOR_ENABLED);
 
-  ADC1::setConversionTime<0, adc::smp::SAMPLING_TIME_13_5_CYCLES>();
-  ADC1::setConversionTime<1, adc::smp::SAMPLING_TIME_13_5_CYCLES>();
-  ADC1::setConversionTime<2, adc::smp::SAMPLING_TIME_13_5_CYCLES>();
-  ADC1::setConversionTime<3, adc::smp::SAMPLING_TIME_13_5_CYCLES>();
-  ADC1::setConversionTime<4, adc::smp::SAMPLING_TIME_13_5_CYCLES>();
-  ADC1::setConversionTime<5, adc::smp::SAMPLING_TIME_13_5_CYCLES>();
-  ADC1::setConversionTime<6, adc::smp::SAMPLING_TIME_13_5_CYCLES>();
-  ADC1::setConversionTime<7, adc::smp::SAMPLING_TIME_13_5_CYCLES>();
-  ADC1::setConversionTime<8, adc::smp::SAMPLING_TIME_13_5_CYCLES>();
-  ADC1::setConversionTime<9, adc::smp::SAMPLING_TIME_13_5_CYCLES>();
-  ADC1::setConversionTime<10, adc::smp::SAMPLING_TIME_13_5_CYCLES>();
-  ADC1::setConversionTime<11, adc::smp::SAMPLING_TIME_13_5_CYCLES>();
-  ADC1::setConversionTime<12, adc::smp::SAMPLING_TIME_13_5_CYCLES>();
-  ADC1::setConversionTime<13, adc::smp::SAMPLING_TIME_13_5_CYCLES>();
-  ADC1::setConversionTime<14, adc::smp::SAMPLING_TIME_13_5_CYCLES>();
-  ADC1::setConversionTime<15, adc::smp::SAMPLING_TIME_13_5_CYCLES>();
-  ADC1::setConversionTime<16, adc::smp::SAMPLING_TIME_13_5_CYCLES>();
-  ADC1::setConversionTime<17, adc::smp::SAMPLING_TIME_13_5_CYCLES>();
+  ADC1::setConversionTime<0, adc::smp::SAMPLING_TIME_71_5_CYCLES>();
+  ADC1::setConversionTime<1, adc::smp::SAMPLING_TIME_71_5_CYCLES>();
+  ADC1::setConversionTime<2, adc::smp::SAMPLING_TIME_71_5_CYCLES>();
+  ADC1::setConversionTime<3, adc::smp::SAMPLING_TIME_71_5_CYCLES>();
+  ADC1::setConversionTime<4, adc::smp::SAMPLING_TIME_71_5_CYCLES>();
+  ADC1::setConversionTime<5, adc::smp::SAMPLING_TIME_71_5_CYCLES>();
+  ADC1::setConversionTime<6, adc::smp::SAMPLING_TIME_71_5_CYCLES>();
+  ADC1::setConversionTime<7, adc::smp::SAMPLING_TIME_71_5_CYCLES>();
+  ADC1::setConversionTime<8, adc::smp::SAMPLING_TIME_71_5_CYCLES>();
+  ADC1::setConversionTime<9, adc::smp::SAMPLING_TIME_71_5_CYCLES>();
+  ADC1::setConversionTime<10, adc::smp::SAMPLING_TIME_71_5_CYCLES>();
+  ADC1::setConversionTime<11, adc::smp::SAMPLING_TIME_71_5_CYCLES>();
+  ADC1::setConversionTime<12, adc::smp::SAMPLING_TIME_71_5_CYCLES>();
+  ADC1::setConversionTime<13, adc::smp::SAMPLING_TIME_71_5_CYCLES>();
+  ADC1::setConversionTime<14, adc::smp::SAMPLING_TIME_71_5_CYCLES>();
+  ADC1::setConversionTime<15, adc::smp::SAMPLING_TIME_71_5_CYCLES>();
+  ADC1::setConversionTime<16, adc::smp::SAMPLING_TIME_71_5_CYCLES>();
+  ADC1::setConversionTime<17, adc::smp::SAMPLING_TIME_71_5_CYCLES>();
 
   ADC1::setRegularSequenceOrder<1, 0>();  // AD_12V
   ADC1::setRegularSequenceOrder<2, 1>();  // AD_BTT
@@ -210,11 +251,17 @@ void initializeAdc()
 
   ADC1::setNumberOfRegularChannels<NUM_DMA_ADC>();
 
+  AD_12V::setMode(gpio::cr::ANALOG_INPUT);
+  AD_BTT::setMode(gpio::cr::ANALOG_INPUT);
+  AD_5V0::setMode(gpio::cr::ANALOG_INPUT);
+  AD_3V3::setMode(gpio::cr::ANALOG_INPUT);
+  AD_VCC::setMode(gpio::cr::ANALOG_INPUT);
+
   ADC1::disablePeripheral();
   delay(10);
   ADC1::enablePeripheral();
   ADC1::resetCalibration();
-  while(!ADC1::hasCalibrationInitialized()) delay(10); 
+  while(!ADC1::hasCalibrationInitialized()) delay(10);
   ADC1::startCalibration();
   while(!ADC1::hasCalibrationEnded()) delay(10);
 }
@@ -240,7 +287,6 @@ void initializeDma()
   DMA_ADC1::setMemoryAddress((void*)dma_adc_buff);
   DMA_ADC1::setNumberOfTransactions(NUM_DMA_ADC);
   DMA_ADC1::setPeripheralAddress(&ADC1_REGS->DR);
-
   DMA_ADC1::enablePeripheral();
   DMA_ADC1::unmaskInterrupts();
 }
@@ -257,6 +303,7 @@ void initializePeripherals()
   TIM2::startCounter();
 }
 
+#if 0
 u16 sqrt32(u32 n)
 {
   u16 c = 0x8000;
@@ -270,21 +317,17 @@ u16 sqrt32(u32 n)
     g |= c;
   }
 }
+#endif
 
 void loop()
 {
   static u64 timer_t1 = 1000;
-  if(timer_t1 < tick)
+  if(tick > timer_t1)
   {
-	u16 n = (u16)dma_count; dma_count = 0;
-
-    // Take data from DMA buffer.
-
-
-    if(dma_count != 0) printf("Error: DMA Overlap !!!\n");
-
     timer_t1 = tick + 500;
     LED_RED::setOutput(LED_RED::isHigh() ? 0 : 1);
+
+    printf("Hello !!!\n");
   }
 }
 
@@ -394,9 +437,8 @@ void interrupt::I2C1_ER()
 void interrupt::TIM2()
 {
   TIM2::clearUpdateFlag();
-  ++tick;
+  // Start new conversion
   DMA_ADC1::enablePeripheral();
-  // Start conversion
   ADC1::enablePeripheral();
 }
 
@@ -411,6 +453,5 @@ void interrupt::DMA1_Channel1()
 
 extern "C" void SysTick()
 {
-  ++systick;
-  LED_GREEN::setOutput(LED_GREEN::isHigh() ? 0 : 1);
+  ++tick;
 }
