@@ -92,6 +92,8 @@ volatile u16 dma_adc_buff[NUM_DMA_ADC];
 volatile u64 tick = 0;
 volatile u64 i2c1_wd = 0;
 
+volatile u32 dbg_i2c = 0;
+
 volatile REGS regs;
 
 void delay(u32 us)
@@ -105,6 +107,7 @@ void initializeGpio()
 {
   GPIOA::enableClock();
   GPIOB::enableClock();
+  AFIO::enableClock();
 
   LED_RED::setHigh();
   LED_RED::setMode(gpio::cr::GP_PUSH_PULL_2MHZ);
@@ -175,6 +178,10 @@ void initializeI2c()
 {
   i2c1_wd = 0;
   I2C1::enableClock(); // Uses APB1 clock
+
+  SCL::setMode(gpio::cr::AF_OPEN_DRAIN_2MHZ);
+  SDA::setMode(gpio::cr::AF_OPEN_DRAIN_2MHZ);
+
   I2C1::configure(
     i2c::cr1::pe::PERIPHERAL_DISABLED,
     i2c::cr1::enpec::PACKET_ERROR_CHECKING_DISABLED,
@@ -188,9 +195,7 @@ void initializeI2c()
   I2C1::configureClock<i2c::ccr::f_s::STANDARD_MODE, i2c::ccr::duty::T_LOW_2_T_HIGH_1, 100000 /*Hz*/>();
   I2C1::setSlaveAddr1(I2C_SLAVE_ADDR);
   I2C1::setSlaveAddr2(0);
-
-  SCL::setMode(gpio::cr::AF_OPEN_DRAIN_2MHZ);
-  SDA::setMode(gpio::cr::AF_OPEN_DRAIN_2MHZ);
+  I2C1::enableACK();
 
   I2C1::enablePeripheral();
   I2C1::unmaskInterrupts();
@@ -330,7 +335,7 @@ void loop()
     timer_t1 = tick + 500;
     LED_RED::setOutput(LED_RED::isHigh() ? 0 : 1);
 
-    printf("Hello !!!\n");
+    printf("[%02x] Hello !!!\n", dbg_i2c);
   }
 }
 
@@ -383,19 +388,24 @@ void interrupt::I2C1_EV()
 	static int mode = I2C_IDLE;
 	static u8 addr = 0;
 
+	dbg_i2c = 0x22;
+
 	if(I2C1::isAddrMatched())
 	{
+		dbg_i2c = 1;
 		i2c1_wd = tick+3000;
 		mode = I2C1::isSlaveTransmitting() ? I2C_SLAVE_READ_DATA : I2C_SLAVE_WRITE_ADDR;
 	}
 	else if(I2C1::isStopReceived())
 	{
+		dbg_i2c = 9;
 		mode = I2C_IDLE;
 		I2C1::enablePeripheral();
 		i2c1_wd = 0;
 	}
 	else if(I2C1::hasReceivedData())
 	{
+		dbg_i2c = 3;
 		if(mode == I2C_SLAVE_WRITE_ADDR)
 		{
 			addr = I2C1::getData();
@@ -413,6 +423,7 @@ void interrupt::I2C1_EV()
 	}
 	else if(I2C1::canSendData())
 	{
+		dbg_i2c = 5;
 		if(mode == I2C_SLAVE_READ_DATA)
 		{
 			I2C1::sendData(0xac);
@@ -425,6 +436,7 @@ void interrupt::I2C1_EV()
 	}
 	else if(I2C1::isNakReceived())
 	{
+		dbg_i2c = 0x11;
 		I2C1::clearNAK();
 	}
 
