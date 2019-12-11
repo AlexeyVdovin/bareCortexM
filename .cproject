@@ -1,5 +1,4 @@
-<?xml version="1.0" encoding="UTF-8" standalone="no"?>
-<?fileVersion 4.0.0?><cproject storage_type_id="org.eclipse.cdt.core.XmlProjectDescriptionStorage">
+<?xml version="1.0" encoding="UTF-8"?><?fileVersion 4.0.0?><cproject storage_type_id="org.eclipse.cdt.core.XmlProjectDescriptionStorage">
 	<storageModule moduleId="org.eclipse.cdt.core.settings">
 		<cconfiguration id="org.eclipse.cdt.cross.arm.gnu.sourcery.linux.elf.debug.952806260">
 			<storageModule buildSystemId="org.eclipse.cdt.managedbuilder.core.configurationDataProvider" id="org.eclipse.cdt.cross.arm.gnu.sourcery.linux.elf.debug.952806260" moduleId="org.eclipse.cdt.core.settings" name="Linux">
@@ -14,7 +13,7 @@
 				</extensions>
 			</storageModule>
 			<storageModule moduleId="cdtBuildSystem" version="4.0.0">
-				<configuration artifactName="${ProjName}" buildProperties="org.eclipse.cdt.build.core.buildType=org.eclipse.cdt.build.core.buildType.debug" description="" id="org.eclipse.cdt.cross.arm.gnu.sourcery.linux.elf.debug.952806260" name="Linux" parent="org.eclipse.cdt.cross.arm.gnu.sourcery.linux.elf.debug.952806260" postannouncebuildStep="Copy the generated ELF file to the &quot;bin&quot; folder." postbuildStep="cp ${BuildArtifactFlePrefix}${BuildArtifactFileName} &quot;${ProjDirPath}/bin/&quot;">
+				<configuration artifactName="${ProjName}" buildProperties="org.eclipse.cdt.build.core.buildType=org.eclipse.cdt.build.core.buildType.debug" description="" id="org.eclipse.cdt.cross.arm.gnu.sourcery.linux.elf.debug.952806260" name="Linux" parent="org.eclipse.cdt.cross.arm.gnu.sourcery.linux.elf.debug.952806260" postannouncebuildStep="Copy the generated ELF file to the &quot;bin&quot; folder." postbuildStep="arm-none-eabi-objcopy -O binary ${BuildArtifactFlePrefix}${BuildArtifactFileName} &quot;${ProjDirPath}/bin/${BuildArtifactFileName}.bin&quot;">
 					<folderInfo id="org.eclipse.cdt.cross.arm.gnu.sourcery.linux.elf.debug.952806260." name="/" resourcePath="">
 						<toolChain id="ilg.gnuarmeclipse.managedbuild.cross.toolchain.base.759917451" name="Cross ARM GCC" superClass="ilg.gnuarmeclipse.managedbuild.cross.toolchain.base">
 							<option id="ilg.gnuarmeclipse.managedbuild.cross.option.architecture.1878343643" name="Architecture" superClass="ilg.gnuarmeclipse.managedbuild.cross.option.architecture" value="ilg.gnuarmeclipse.managedbuild.cross.option.architecture.arm" valueType="enumerated"/>
