@@ -178,11 +178,7 @@ void initializeTimer()
 
 void initializeI2c()
 {
-	  i2c1_wd = 0;
-
-	  SCL::setMode(gpio::cr::FLOATING_INPUT);
-	  SDA::setMode(gpio::cr::FLOATING_INPUT);
-	return;
+  i2c1_wd = 0;
   I2C1::enableClock(); // Uses APB1 clock
   SCL::setMode(gpio::cr::AF_OPEN_DRAIN_2MHZ);
   SDA::setMode(gpio::cr::AF_OPEN_DRAIN_2MHZ);
@@ -201,8 +197,7 @@ void initializeI2c()
   I2C1::setSlave7BitAddr1(I2C_SLAVE_ADDR);
   I2C1::enableACK();
 
-//  I2C1::enablePeripheral();
-//  I2C1::unmaskInterrupts();
+  I2C1::unmaskInterrupts();
 }
 
 void initializeAdc()
@@ -341,6 +336,7 @@ void loop()
 
     printf("[%02x] SCL:%d, SDA:%d\n", dbg_i2c, SCL::getInput(), SDA::getInput());
   }
+  // if(SCL::getInput() == 0 || SDA::getInput() == 0) printf("SCL:%d, SDA:%d\n", SCL::getInput(), SDA::getInput());
 }
 
 int main()
@@ -353,7 +349,7 @@ int main()
 
   while (true) {
     loop();
-    if(i2c1_wd != 0 && i2c1_wd < tick)
+    if(0 && i2c1_wd != 0 && i2c1_wd < tick)
     {
     	I2C1::disablePeripheral();
     	I2C1::reset();
@@ -391,7 +387,7 @@ void interrupt::I2C1_EV()
 {
 	static int mode = I2C_IDLE;
 	static u8 addr = 0;
-	u32 sr1, sr2;
+	u32 sr1, sr2, cr1;
 
 	dbg_i2c = 0x22;
 
@@ -408,7 +404,8 @@ void interrupt::I2C1_EV()
 		dbg_i2c = 9;
 		mode = I2C_IDLE;
 		I2C1::enablePeripheral();
-		I2C1_REG->CR1 = I2C1_REG->CR1;
+		cr1 = I2C1_REG->CR1;
+		I2C1_REG->CR1 = cr1;
 		i2c1_wd = 0;
 	}
 	else if(I2C1::hasReceivedData())
