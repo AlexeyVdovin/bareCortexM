@@ -38,6 +38,8 @@
 #define UART1_BAUD_RATE 9600
 #define I2C_SLAVE_ADDR  0x10
 
+#define I2C1_REG reinterpret_cast<i2c::Registers*>(i2c::I2C1)
+
 typedef PB8  LED_RED;
 typedef PB9  LED_GREEN;
 
@@ -176,29 +178,31 @@ void initializeTimer()
 
 void initializeI2c()
 {
-  i2c1_wd = 0;
-  I2C1::enableClock(); // Uses APB1 clock
+	  i2c1_wd = 0;
 
+	  SCL::setMode(gpio::cr::FLOATING_INPUT);
+	  SDA::setMode(gpio::cr::FLOATING_INPUT);
+	return;
+  I2C1::enableClock(); // Uses APB1 clock
   SCL::setMode(gpio::cr::AF_OPEN_DRAIN_2MHZ);
   SDA::setMode(gpio::cr::AF_OPEN_DRAIN_2MHZ);
 
-  I2C1::configure(
-    i2c::cr1::pe::PERIPHERAL_DISABLED,
-    i2c::cr1::enpec::PACKET_ERROR_CHECKING_DISABLED,
+  I2C1::configureI2c(
+    i2c::cr1::pe::PERIPHERAL_ENABLED,
     i2c::cr1::engc::GENERAL_CALL_DISABLED,
     i2c::cr1::nostretch::CLOCK_STRETCHING_ENABLED,
+    i2c::cr1::ack::ACKNOWLEDGE_ENABLED,
     i2c::cr2::iterren::ERROR_INTERRUPT_ENABLED,
     i2c::cr2::itevten::EVENT_INTERRUPT_ENABLED,
     i2c::cr2::itbufen::BUFFER_INTERRUPT_ENABLED,
     i2c::cr2::dmaen::DMA_REQUEST_DISABLED,
     i2c::cr2::last::NEXT_DMA_IS_NOT_THE_LAST_TRANSFER);
   I2C1::configureClock<i2c::ccr::f_s::STANDARD_MODE, i2c::ccr::duty::T_LOW_2_T_HIGH_1, 100000 /*Hz*/>();
-  I2C1::setSlaveAddr1(I2C_SLAVE_ADDR);
-  I2C1::setSlaveAddr2(0);
+  I2C1::setSlave7BitAddr1(I2C_SLAVE_ADDR);
   I2C1::enableACK();
 
-  I2C1::enablePeripheral();
-  I2C1::unmaskInterrupts();
+//  I2C1::enablePeripheral();
+//  I2C1::unmaskInterrupts();
 }
 
 void initializeAdc()
@@ -335,7 +339,7 @@ void loop()
     timer_t1 = tick + 500;
     LED_RED::setOutput(LED_RED::isHigh() ? 0 : 1);
 
-    printf("[%02x] Hello !!!\n", dbg_i2c);
+    printf("[%02x] SCL:%d, SDA:%d\n", dbg_i2c, SCL::getInput(), SDA::getInput());
   }
 }
 
@@ -387,6 +391,7 @@ void interrupt::I2C1_EV()
 {
 	static int mode = I2C_IDLE;
 	static u8 addr = 0;
+	u32 sr1, sr2;
 
 	dbg_i2c = 0x22;
 
@@ -395,12 +400,15 @@ void interrupt::I2C1_EV()
 		dbg_i2c = 1;
 		i2c1_wd = tick+3000;
 		mode = I2C1::isSlaveTransmitting() ? I2C_SLAVE_READ_DATA : I2C_SLAVE_WRITE_ADDR;
+		sr1 = I2C1_REG->SR1;
+		sr2 = I2C1_REG->SR2;
 	}
 	else if(I2C1::isStopReceived())
 	{
 		dbg_i2c = 9;
 		mode = I2C_IDLE;
 		I2C1::enablePeripheral();
+		I2C1_REG->CR1 = I2C1_REG->CR1;
 		i2c1_wd = 0;
 	}
 	else if(I2C1::hasReceivedData())
