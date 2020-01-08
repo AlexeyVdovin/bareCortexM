@@ -28,6 +28,8 @@
 
 #include "peripheral/afio.hpp"
 #include "peripheral/gpio.hpp"
+#include "peripheral/crc.hpp"
+#include "peripheral/flash.hpp"
 #include "peripheral/usart.hpp"
 #include "peripheral/adc.hpp"
 #include "peripheral/dma.hpp"
@@ -37,6 +39,7 @@
 
 #define UART1_BAUD_RATE 9600
 #define I2C_SLAVE_ADDR  0x10
+
 
 #define I2C1_REG reinterpret_cast<i2c::Registers*>(i2c::I2C1)
 
@@ -66,27 +69,62 @@ typedef PB4   EXT_RST;// OD
 typedef PB5   OPT_EN; // PP
 typedef PB15  PWR_EN; // OD
 
+enum {
+	NV_CMD_READ  = 0x10000000,
+	NV_CMD_WRITE = 0x20000000,
+	NV_CMD_SAVE  = 0x40000000,
+	NV_CMD_ADDR  = 0x0FFFFFFF
+};
+
 typedef struct
 {
   u64 tick;     // 0x00
   u32 status;   // 0x08
-  u16 control;  // 0x0a
-  s16 adc_12v;  // 0x0c
-  s16 adc_btt;  // 0x0e
-  s16 adc_5v0;  // 0x10
-  s16 adc_3v3;  // 0x12
-  s16 adc_vcc;  // 0x14
-  s16 adc_ref;  // 0x16
-  s16 adc_temp; // 0x18
-  u16 res1;     // 0x1a
-  u16 res2;     // 0x1c
-  u16 res3;     // 0x1e
-  u16 nv_adr;   // 0x20
-  u16 nv_cmd;   // 0x22
-  u16 nv_data;  // 0x24
+  u16 control;  // 0x0c
+  s16 adc_12v;  // 0x0e
+  s16 adc_btt;  // 0x10
+  s16 adc_5v0;  // 0x12
+  s16 adc_3v3;  // 0x14
+  s16 adc_vcc;  // 0x16
+  s16 adc_ref;  // 0x18
+  s16 adc_temp; // 0x1a
+  u16 res1;     // 0x1c
+  u16 res2;     // 0x1e
+  u32 nv_cmd;   // 0x20 NV_CMD_****
+  u32 nv_data;  // 0x24
 } REGS;
 
+typedef struct
+{
+  u16 i2c_id;
+  u16 node_id;
+  s16 k_12v;   // k in 1/8192
+  s16 c_12v;   // value = k*dma + c
+  s16 k_btt;
+  s16 c_btt;
+  s16 k_5v0;
+  s16 c_5v0;
+  s16 k_3v3;
+  s16 c_3v3;
+  s16 k_vcc;
+  s16 c_vcc;
+  s16 k_ref;
+  s16 c_ref;
+  s16 k_temp;
+  s16 c_temp;
+  s16 lo_btt;
+  s16 reserved;
+  u32 crc;
+} CONF;
+
+
 enum { NUM_DMA_ADC = 7 };
+
+extern const u32 __flash_start;
+extern const u32 __flash_end;
+
+const u32 flash_start = (u32)(&__flash_start);
+const u32 flash_end = (u32)(&__flash_end);
 
 volatile u32 dma_count;
 volatile u16 dma_adc_buff[NUM_DMA_ADC];
@@ -97,6 +135,14 @@ volatile u64 i2c1_wd = 0;
 volatile u32 dbg_i2c = 0;
 
 volatile REGS regs;
+volatile CONF conf; // Copy from nv_conf
+CONF* conf1;
+CONF* conf2;
+
+inline void* align_ptr(void* adr, u32 align)
+{
+  return (void*)((1 + ((u32)adr - 1) / align) * align);
+}
 
 void delay(u32 us)
 {
@@ -131,6 +177,114 @@ void initializeGpio()
 
   INTB::setMode(gpio::cr::FLOATING_INPUT);
   OPT_V::setMode(gpio::cr::FLOATING_INPUT);
+}
+
+void conf_write(CONF* dst, volatile CONF* src)
+{
+  u32 c, i, *p;
+  u16 *d, *s;
+
+  p = (u32*)src;
+  CRC::reset();
+  for(i = 0; i < (sizeof(CONF)/sizeof(u32)-1); ++i)
+    CRC::calc(*(p+i));
+  src->crc = CRC::getCrc();
+
+  do
+  {
+    s = (u16*)src;
+    d = (u16*)dst;
+    FLASH::unlock();
+    FLASH::erasePage((u32)dst);
+    for(c = 0; c < 100; c++)
+    {
+      if(!FLASH::isBusy()) { c = 0; break; }
+      delay(100);
+    }
+    if(c > 0) { printf("Error: Flash erase 0x%08X!\n", dst); break; }
+    for(i = 0; i < (sizeof(CONF)/sizeof(u16)); ++i)
+    {
+      FLASH::programm((u32)(d+i), *s+i);
+      for(c = 0; c < 10; c++)
+      {
+  	    if(!FLASH::isBusy()) { c = 0; break; }
+        delay(100);
+      }
+      if(c > 0) { printf("Error: Flash write 0x%08X!\n", d+i); break; }
+    }
+    if(c > 0) break;
+    if(memcmp((void*)src, dst, sizeof(CONF)) != 0) { printf("Error: Flash verification failed 0x%08X!\n", dst); break; }
+    printf("Config 0x%08X updated.\n", dst);
+  } while(0);
+  FLASH::lock();
+}
+
+void initializeConf()
+{
+  u32 i;
+  u32* p;
+  bool c1 = false;
+  bool c2 = false;
+
+  conf1 = (CONF*)align_ptr((void*)(flash_end-1024), 1024);
+  conf2 = (CONF*)align_ptr((void*)(flash_end-2048), 1024);
+
+  CRC::enableClock();
+
+  p = (u32*)conf1;
+  CRC::reset();
+  for(i = 0; i < (sizeof(CONF)/sizeof(u32)-1); ++i)
+	  CRC::calc(*(p+i));
+  if(conf1->crc == CRC::getCrc())
+  {
+	memcpy((void*)&conf, conf1, sizeof(CONF));
+	c1 = true;
+	printf("Conf1 CRC match.\n");
+  }
+
+  p = (u32*)conf2;
+  CRC::reset();
+  for(i = 0; i < (sizeof(CONF)/sizeof(u32)-1); ++i)
+	  CRC::calc(*(p+i));
+  if(conf2->crc == CRC::getCrc())
+  {
+	if(c1 == false) memcpy((void*)&conf, conf2, sizeof(CONF));
+	c2 = true;
+	printf("Conf2 CRC match.\n");
+  }
+
+  if(c1 && (c2 == false || conf2->crc != conf1->crc))
+  {
+	// Save conf to conf2 Flash
+	  conf_write(conf2, &conf);
+  }
+  if(c2 && c1 == false)
+  {
+	// Save conf to conf1 Flash
+	  conf_write(conf1, &conf);
+  }
+  if(c1 == false && c2 == false)
+  {
+    printf("Initialize conf with default values.\n");
+    conf.i2c_id = 0x10;
+    conf.node_id = 0x3FFF;
+    conf.k_12v = 8192;
+    conf.c_12v = 0;
+    conf.k_btt = 8192;
+    conf.c_btt = 0;
+    conf.k_5v0 = 8192;
+    conf.c_5v0 = 0;
+    conf.k_3v3 = 8192;
+    conf.c_3v3 = 0;
+    conf.k_vcc = 8192;
+    conf.c_vcc = 0;
+    conf.k_ref = 8192;
+    conf.c_ref = 0;
+    conf.k_temp = 8192; // TODO: Set correct default Temperature conversion constants
+    conf.c_temp = 0;
+    conf.lo_btt = 10800;
+  }
+
 }
 
 void initializeUsart1()
@@ -301,9 +455,10 @@ void initializeDma()
 void initializePeripherals()
 {
   initializeGpio();
+  initializeUsart1();
+  initializeConf();
   initializeTimer();
   initializeI2c();
-  initializeUsart1();
   initializeAdc();
   initializeDma();
 
@@ -334,7 +489,7 @@ void loop()
     timer_t1 = tick + 500;
     LED_RED::setOutput(LED_RED::isHigh() ? 0 : 1);
 
-    printf("[%02x] SCL:%d, SDA:%d\n", dbg_i2c, SCL::getInput(), SDA::getInput());
+    // printf("[%02x] SCL:%d, SDA:%d\n", dbg_i2c, SCL::getInput(), SDA::getInput());
   }
   // if(SCL::getInput() == 0 || SDA::getInput() == 0) printf("SCL:%d, SDA:%d\n", SCL::getInput(), SDA::getInput());
 }
@@ -345,7 +500,8 @@ int main()
 
   initializePeripherals();
 
-
+  printf("conf1: 0x%08x\n", conf1);
+  printf("conf2: 0x%08x\n", conf2);
 
   while (true) {
     loop();
@@ -387,6 +543,7 @@ void interrupt::I2C1_EV()
 {
 	static int mode = I2C_IDLE;
 	static u8 addr = 0;
+	u8* data = (u8*)&regs;
 	u32 sr1, sr2, cr1;
 
 	dbg_i2c = 0x22;
@@ -416,9 +573,10 @@ void interrupt::I2C1_EV()
 			addr = I2C1::getData();
 			mode = I2C_SLAVE_WRITE_DATA;
 		}
-		else if(mode == I2C_SLAVE_WRITE_DATA)
+		else if(mode == I2C_SLAVE_WRITE_DATA && addr < sizeof(regs))
 		{
-			I2C1::getData();
+			*(data+addr) = I2C1::getData();
+			addr++;
 		}
 		else
 		{
@@ -429,9 +587,11 @@ void interrupt::I2C1_EV()
 	else if(I2C1::canSendData())
 	{
 		dbg_i2c = 5;
-		if(mode == I2C_SLAVE_READ_DATA)
+		if(mode == I2C_SLAVE_READ_DATA && addr < sizeof(regs))
 		{
-			I2C1::sendData(0xac);
+			if(addr == 0) regs.tick = tick;
+ 			I2C1::sendData(*(data+addr));
+			addr++;
 		}
 		else
 		{
@@ -466,6 +626,14 @@ void interrupt::DMA1_Channel1()
 {
   ++dma_count;
   DMA_ADC1::clearGlobalFlag();
+
+  regs.adc_12v = (s16)((s32)conf.k_12v*dma_adc_buff[0]/8192 + conf.c_12v);
+  regs.adc_btt = (s16)((s32)conf.k_btt*dma_adc_buff[1]/8192 + conf.c_btt);
+  regs.adc_5v0 = (s16)((s32)conf.k_5v0*dma_adc_buff[2]/8192 + conf.c_5v0);
+  regs.adc_3v3 = (s16)((s32)conf.k_3v3*dma_adc_buff[3]/8192 + conf.c_3v3);
+  regs.adc_vcc = (s16)((s32)conf.k_vcc*dma_adc_buff[4]/8192 + conf.c_vcc);
+  regs.adc_temp = (s16)((s32)conf.k_temp*dma_adc_buff[5]/8192 + conf.c_temp);
+  regs.adc_ref = (s16)((s32)conf.k_ref*dma_adc_buff[6]/8192 + conf.c_ref);
 
   DMA_ADC1::disablePeripheral();
   DMA_ADC1::setNumberOfTransactions(NUM_DMA_ADC);

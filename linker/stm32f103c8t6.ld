@@ -56,6 +56,8 @@ SECTIONS
  		*(.dtors)
 
 		*(.rodata*)
+		__flash_start = ORIGIN(FLASH);
+		__flash_end = ORIGIN(FLASH) + LENGTH(FLASH);
 
 		KEEP(*(.eh_frame*))
 	} > FLASH
