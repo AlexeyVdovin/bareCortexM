@@ -78,7 +78,7 @@ enum {
 
 typedef struct
 {
-  u64 tick;     // 0x00
+  s64 tick;     // 0x00
   u32 status;   // 0x08
   u16 control;  // 0x0c
   s16 adc_12v;  // 0x0e
@@ -92,6 +92,7 @@ typedef struct
   u16 res2;     // 0x1e
   u32 nv_cmd;   // 0x20 NV_CMD_****
   u32 nv_data;  // 0x24
+  u8 count[4];  // 0x28
 } REGS;
 
 typedef struct
@@ -129,8 +130,8 @@ const u32 flash_end = (u32)(&__flash_end);
 volatile u32 dma_count;
 volatile u16 dma_adc_buff[NUM_DMA_ADC];
 
-volatile u64 tick = 0;
-volatile u64 i2c1_wd = 0;
+volatile s64 tick = 0;
+volatile s64 i2c1_wd = 0;
 
 volatile u32 dbg_i2c = 0;
 
@@ -342,7 +343,7 @@ void initializeI2c()
     i2c::cr1::engc::GENERAL_CALL_DISABLED,
     i2c::cr1::nostretch::CLOCK_STRETCHING_ENABLED,
     i2c::cr1::ack::ACKNOWLEDGE_ENABLED,
-    i2c::cr2::iterren::ERROR_INTERRUPT_ENABLED,
+    i2c::cr2::iterren::ERROR_INTERRUPT_DISABLED,
     i2c::cr2::itevten::EVENT_INTERRUPT_ENABLED,
     i2c::cr2::itbufen::BUFFER_INTERRUPT_ENABLED,
     i2c::cr2::dmaen::DMA_REQUEST_DISABLED,
@@ -483,7 +484,8 @@ u16 sqrt32(u32 n)
 
 void loop()
 {
-  static u64 timer_t1 = 1000;
+  static s64 timer_t1 = 1000;
+
   if(tick > timer_t1)
   {
     timer_t1 = tick + 500;
@@ -498,6 +500,7 @@ int main()
 {
   clk::initialize();
 
+  memset((void*)&regs, 0, sizeof(regs));
   initializePeripherals();
 
   printf("conf1: 0x%08x\n", conf1);
@@ -543,10 +546,12 @@ void interrupt::I2C1_EV()
 {
 	static int mode = I2C_IDLE;
 	static u8 addr = 0;
-	u8* data = (u8*)&regs;
-	u32 sr1, sr2, cr1;
+	u8* data = (addr >= 0x80)?(u8*)&conf:(u8*)&regs;
+	u8 a = (addr >= 0x80)?addr-0x80:addr;
+	volatile u32 sr1, sr2, cr1;
 
 	dbg_i2c = 0x22;
+	LED_GREEN::setOutput(0);
 
 	if(I2C1::isAddrMatched())
 	{
@@ -573,24 +578,25 @@ void interrupt::I2C1_EV()
 			addr = I2C1::getData();
 			mode = I2C_SLAVE_WRITE_DATA;
 		}
-		else if(mode == I2C_SLAVE_WRITE_DATA && addr < sizeof(regs))
+		else if(mode == I2C_SLAVE_WRITE_DATA && a < ((addr >= 0x80)?sizeof(conf):sizeof(regs)))
 		{
-			*(data+addr) = I2C1::getData();
+			*(data+a) = I2C1::getData();
 			addr++;
 		}
 		else
 		{
 			// Incorrect state, ignore data
-			I2C1::getData();
+			cr1 = I2C1::getData();
+			(void)cr1;
 		}
 	}
 	else if(I2C1::canSendData())
 	{
 		dbg_i2c = 5;
-		if(mode == I2C_SLAVE_READ_DATA && addr < sizeof(regs))
+		if(mode == I2C_SLAVE_READ_DATA && addr < a < ((addr >= 0x80)?sizeof(conf):sizeof(regs)))
 		{
 			if(addr == 0) regs.tick = tick;
- 			I2C1::sendData(*(data+addr));
+ 			I2C1::sendData(*(data+a));
 			addr++;
 		}
 		else
@@ -605,6 +611,7 @@ void interrupt::I2C1_EV()
 		I2C1::clearNAK();
 	}
 
+	LED_GREEN::setOutput(1);
 
 }
 
