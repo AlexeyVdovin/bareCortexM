@@ -76,6 +76,12 @@ enum {
 	NV_CMD_ADDR  = 0x0FFFFFFF
 };
 
+enum {
+	CTRL_EXT_RST	= 0x8000,
+	CTRL_OPT_EN		= 0x0100,
+	CTRL_LED_ON		= 0x0001
+};
+
 typedef struct
 {
   s64 tick;     // 0x00
@@ -97,22 +103,21 @@ typedef struct
 
 typedef struct
 {
+	s16	k; // k in 1/8192
+	s16 c; // value = k * RAW + c
+} kv_t;
+
+typedef struct
+{
   u16 i2c_id;
   u16 node_id;
-  s16 k_12v;   // k in 1/8192
-  s16 c_12v;   // value = k*dma + c
-  s16 k_btt;
-  s16 c_btt;
-  s16 k_5v0;
-  s16 c_5v0;
-  s16 k_3v3;
-  s16 c_3v3;
-  s16 k_vcc;
-  s16 c_vcc;
-  s16 k_ref;
-  s16 c_ref;
-  s16 k_temp;
-  s16 c_temp;
+  kv_t kv_12v;
+  kv_t kv_btt;
+  kv_t kv_5v0;
+  kv_t kv_3v3;
+  kv_t kv_vcc;
+  kv_t kv_ref;
+  kv_t kv_temp;
   s16 lo_btt;
   s16 reserved;
   u32 crc;
@@ -133,12 +138,11 @@ volatile u16 dma_adc_buff[NUM_DMA_ADC];
 volatile s64 tick = 0;
 volatile s64 i2c1_wd = 0;
 
-volatile u32 dbg_i2c = 0;
-
 volatile REGS regs;
 volatile CONF conf; // Copy from nv_conf
 CONF* conf1;
 CONF* conf2;
+volatile u16 control;
 
 inline void* align_ptr(void* adr, u32 align)
 {
@@ -165,7 +169,7 @@ void initializeGpio()
   LED_GREEN::setMode(gpio::cr::GP_PUSH_PULL_2MHZ);
 
   OPT_EN::setMode(gpio::cr::GP_PUSH_PULL_2MHZ);
-  OPT_EN::setLow();
+  OPT_EN::setHigh();
 
   PA07::setHigh();
   PA07::setMode(gpio::cr::GP_OPEN_DRAIN_2MHZ);
@@ -269,20 +273,20 @@ void initializeConf()
     printf("Initialize conf with default values.\n");
     conf.i2c_id = 0x10;
     conf.node_id = 0x3FFF;
-    conf.k_12v = 8192;
-    conf.c_12v = 0;
-    conf.k_btt = 8192;
-    conf.c_btt = 0;
-    conf.k_5v0 = 8192;
-    conf.c_5v0 = 0;
-    conf.k_3v3 = 8192;
-    conf.c_3v3 = 0;
-    conf.k_vcc = 8192;
-    conf.c_vcc = 0;
-    conf.k_ref = 8192;
-    conf.c_ref = 0;
-    conf.k_temp = 8192; // TODO: Set correct default Temperature conversion constants
-    conf.c_temp = 0;
+    conf.kv_12v.k = 26460;
+    conf.kv_12v.c = 0;
+    conf.kv_btt.k = 26460;
+    conf.kv_btt.c = 0;
+    conf.kv_5v0.k = 10082;
+    conf.kv_5v0.c = 0;
+    conf.kv_3v3.k = 6634;
+    conf.kv_3v3.c = 0;
+    conf.kv_vcc.k = 6625;
+    conf.kv_vcc.c = 0;
+    conf.kv_ref.k = 8192;
+    conf.kv_ref.c = 0;
+    conf.kv_temp.k = 8192; // TODO: Set correct default Temperature conversion constants
+    conf.kv_temp.c = 0;
     conf.lo_btt = 10800;
   }
 
@@ -482,6 +486,12 @@ u16 sqrt32(u32 n)
 }
 #endif
 
+/*
+ * 	CTRL_EXT_RST	= 0x8000,
+	CTRL_OPT_EN		= 0x0100,
+	CTRL_LED_ON		= 0x0001
+ *
+ */
 void loop()
 {
   static s64 timer_t1 = 1000;
@@ -491,9 +501,15 @@ void loop()
     timer_t1 = tick + 500;
     LED_RED::setOutput(LED_RED::isHigh() ? 0 : 1);
 
-    // printf("[%02x] SCL:%d, SDA:%d\n", dbg_i2c, SCL::getInput(), SDA::getInput());
   }
-  // if(SCL::getInput() == 0 || SDA::getInput() == 0) printf("SCL:%d, SDA:%d\n", SCL::getInput(), SDA::getInput());
+  if(regs.control != control)
+  {
+	  if((regs.control&CTRL_LED_ON) != (control&CTRL_LED_ON)) LED_GREEN::setOutput((regs.control&CTRL_LED_ON) ? 0 : 1);
+	  if((regs.control&CTRL_OPT_EN) != (control&CTRL_OPT_EN)) OPT_EN::setOutput((regs.control&CTRL_OPT_EN) ? 1 : 0);
+	  if((regs.control&CTRL_EXT_RST) != (control&CTRL_EXT_RST)) EXT_RST::setOutput((regs.control&CTRL_EXT_RST) ? 0 : 1);
+
+	  control = regs.control;
+  }
 }
 
 int main()
@@ -505,6 +521,11 @@ int main()
 
   printf("conf1: 0x%08x\n", conf1);
   printf("conf2: 0x%08x\n", conf2);
+
+  control = regs.control;
+
+  // Enable DCDC
+  // OPT_EN::setHigh();
 
   while (true) {
     loop();
@@ -550,12 +571,8 @@ void interrupt::I2C1_EV()
 	u8 a = (addr >= 0x80)?addr-0x80:addr;
 	volatile u32 sr1, sr2, cr1;
 
-	dbg_i2c = 0x22;
-	LED_GREEN::setOutput(0);
-
 	if(I2C1::isAddrMatched())
 	{
-		dbg_i2c = 1;
 		i2c1_wd = tick+3000;
 		mode = I2C1::isSlaveTransmitting() ? I2C_SLAVE_READ_DATA : I2C_SLAVE_WRITE_ADDR;
 		sr1 = I2C1_REG->SR1;
@@ -563,7 +580,6 @@ void interrupt::I2C1_EV()
 	}
 	else if(I2C1::isStopReceived())
 	{
-		dbg_i2c = 9;
 		mode = I2C_IDLE;
 		I2C1::enablePeripheral();
 		cr1 = I2C1_REG->CR1;
@@ -572,7 +588,6 @@ void interrupt::I2C1_EV()
 	}
 	else if(I2C1::hasReceivedData())
 	{
-		dbg_i2c = 3;
 		if(mode == I2C_SLAVE_WRITE_ADDR)
 		{
 			addr = I2C1::getData();
@@ -592,7 +607,6 @@ void interrupt::I2C1_EV()
 	}
 	else if(I2C1::canSendData())
 	{
-		dbg_i2c = 5;
 		if(mode == I2C_SLAVE_READ_DATA && addr < a < ((addr >= 0x80)?sizeof(conf):sizeof(regs)))
 		{
 			if(addr == 0) regs.tick = tick;
@@ -607,17 +621,13 @@ void interrupt::I2C1_EV()
 	}
 	else if(I2C1::isNakReceived())
 	{
-		dbg_i2c = 0x11;
 		I2C1::clearNAK();
 	}
-
-	LED_GREEN::setOutput(1);
-
 }
 
 void interrupt::I2C1_ER()
 {
-
+  // TODO: Add error handling and recovery
 }
 
 
@@ -634,13 +644,13 @@ void interrupt::DMA1_Channel1()
   ++dma_count;
   DMA_ADC1::clearGlobalFlag();
 
-  regs.adc_12v = (s16)((s32)conf.k_12v*dma_adc_buff[0]/8192 + conf.c_12v);
-  regs.adc_btt = (s16)((s32)conf.k_btt*dma_adc_buff[1]/8192 + conf.c_btt);
-  regs.adc_5v0 = (s16)((s32)conf.k_5v0*dma_adc_buff[2]/8192 + conf.c_5v0);
-  regs.adc_3v3 = (s16)((s32)conf.k_3v3*dma_adc_buff[3]/8192 + conf.c_3v3);
-  regs.adc_vcc = (s16)((s32)conf.k_vcc*dma_adc_buff[4]/8192 + conf.c_vcc);
-  regs.adc_temp = (s16)((s32)conf.k_temp*dma_adc_buff[5]/8192 + conf.c_temp);
-  regs.adc_ref = (s16)((s32)conf.k_ref*dma_adc_buff[6]/8192 + conf.c_ref);
+  regs.adc_12v = (s16)((s32)conf.kv_12v.k * dma_adc_buff[0]/2048 + conf.kv_12v.c);
+  regs.adc_btt = (s16)((s32)conf.kv_btt.k * dma_adc_buff[1]/2048 + conf.kv_btt.c);
+  regs.adc_5v0 = (s16)((s32)conf.kv_5v0.k * dma_adc_buff[2]/2048 + conf.kv_5v0.c);
+  regs.adc_3v3 = (s16)((s32)conf.kv_3v3.k * dma_adc_buff[3]/2048 + conf.kv_3v3.c);
+  regs.adc_vcc = (s16)((s32)conf.kv_vcc.k * dma_adc_buff[4]/2048 + conf.kv_vcc.c);
+  regs.adc_temp = (s16)((s32)conf.kv_temp.k * dma_adc_buff[5]/8192 + conf.kv_temp.c);
+  regs.adc_ref = (s16)((s32)conf.kv_ref.k * dma_adc_buff[6]/8192 + conf.kv_ref.c);
 
   DMA_ADC1::disablePeripheral();
   DMA_ADC1::setNumberOfTransactions(NUM_DMA_ADC);
