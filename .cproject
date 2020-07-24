@@ -139,6 +139,9 @@
 							</tool>
 						</toolChain>
 					</folderInfo>
+					<fileInfo id="org.eclipse.cdt.cross.arm.gnu.sourcery.linux.elf.debug.952806260.863069003" name="gps.cpp" rcbsApplicability="disable" resourcePath="src/gps.cpp" toolsToInvoke="ilg.gnuarmeclipse.managedbuild.cross.tool.cpp.compiler.2009444210.1274524604">
+						<tool id="ilg.gnuarmeclipse.managedbuild.cross.tool.cpp.compiler.2009444210.1274524604" name="Cross ARM C++ Compiler" superClass="ilg.gnuarmeclipse.managedbuild.cross.tool.cpp.compiler.2009444210"/>
+					</fileInfo>
 					<folderInfo id="org.eclipse.cdt.cross.arm.gnu.sourcery.linux.elf.debug.952806260.1297664790" name="/" resourcePath="Host">
 						<toolChain id="ilg.gnuarmeclipse.managedbuild.cross.toolchain.base.1377519656" name="Cross ARM GCC" superClass="ilg.gnuarmeclipse.managedbuild.cross.toolchain.base" unusedChildren="">
 							<option id="ilg.gnuarmeclipse.managedbuild.cross.option.architecture.1878343643.1204847559" name="Architecture" superClass="ilg.gnuarmeclipse.managedbuild.cross.option.architecture.1878343643"/>
@@ -211,9 +214,16 @@
 							<option id="ilg.gnuarmeclipse.managedbuild.cross.option.debugging.prof.1976099644.71907249" name="Generate prof information (-p)" superClass="ilg.gnuarmeclipse.managedbuild.cross.option.debugging.prof.1976099644"/>
 							<option id="ilg.gnuarmeclipse.managedbuild.cross.option.debugging.gprof.1718163538.1777384937" name="Generate gprof information (-pg)" superClass="ilg.gnuarmeclipse.managedbuild.cross.option.debugging.gprof.1718163538"/>
 							<option id="ilg.gnuarmeclipse.managedbuild.cross.option.debugging.other.540276008.740436046" name="Other debugging flags" superClass="ilg.gnuarmeclipse.managedbuild.cross.option.debugging.other.540276008"/>
-							<tool id="ilg.gnuarmeclipse.managedbuild.cross.tool.assembler.1766867287" name="Cross ARM GNU Assembler" superClass="ilg.gnuarmeclipse.managedbuild.cross.tool.assembler.1951952322"/>
-							<tool id="ilg.gnuarmeclipse.managedbuild.cross.tool.c.compiler.394545864" name="Cross ARM C Compiler" superClass="ilg.gnuarmeclipse.managedbuild.cross.tool.c.compiler.1442478535"/>
-							<tool id="ilg.gnuarmeclipse.managedbuild.cross.tool.cpp.compiler.357668648" name="Cross ARM C++ Compiler" superClass="ilg.gnuarmeclipse.managedbuild.cross.tool.cpp.compiler.2009444210"/>
+							<targetPlatform archList="all" binaryParser="org.eclipse.cdt.core.ELF" id="ilg.gnuarmeclipse.managedbuild.cross.targetPlatform" isAbstract="false" osList="all" superClass="ilg.gnuarmeclipse.managedbuild.cross.targetPlatform"/>
+							<tool id="ilg.gnuarmeclipse.managedbuild.cross.tool.assembler.1766867287" name="Cross ARM GNU Assembler" superClass="ilg.gnuarmeclipse.managedbuild.cross.tool.assembler.1951952322">
+								<inputType id="ilg.gnuarmeclipse.managedbuild.cross.tool.assembler.input.2049809170" superClass="ilg.gnuarmeclipse.managedbuild.cross.tool.assembler.input"/>
+							</tool>
+							<tool id="ilg.gnuarmeclipse.managedbuild.cross.tool.c.compiler.394545864" name="Cross ARM C Compiler" superClass="ilg.gnuarmeclipse.managedbuild.cross.tool.c.compiler.1442478535">
+								<inputType id="ilg.gnuarmeclipse.managedbuild.cross.tool.c.compiler.input.1474651769" superClass="ilg.gnuarmeclipse.managedbuild.cross.tool.c.compiler.input"/>
+							</tool>
+							<tool id="ilg.gnuarmeclipse.managedbuild.cross.tool.cpp.compiler.357668648" name="Cross ARM C++ Compiler" superClass="ilg.gnuarmeclipse.managedbuild.cross.tool.cpp.compiler.2009444210">
+								<inputType id="ilg.gnuarmeclipse.managedbuild.cross.tool.cpp.compiler.input.120172599" superClass="ilg.gnuarmeclipse.managedbuild.cross.tool.cpp.compiler.input"/>
+							</tool>
 							<tool id="ilg.gnuarmeclipse.managedbuild.cross.tool.c.linker.945817991" name="Cross ARM C Linker" superClass="ilg.gnuarmeclipse.managedbuild.cross.tool.c.linker.1797448398"/>
 							<tool id="ilg.gnuarmeclipse.managedbuild.cross.tool.cpp.linker.1134792582" name="Cross ARM C++ Linker" superClass="ilg.gnuarmeclipse.managedbuild.cross.tool.cpp.linker.1297000015"/>
 							<tool id="ilg.gnuarmeclipse.managedbuild.cross.tool.archiver.672145253" name="Cross ARM GNU Archiver" superClass="ilg.gnuarmeclipse.managedbuild.cross.tool.archiver.1451257283"/>
@@ -224,7 +234,7 @@
 					</folderInfo>
 					<sourceEntries>
 						<entry excluding="Host|src" flags="VALUE_WORKSPACE_PATH|RESOLVED" kind="sourcePath" name=""/>
-						<entry flags="VALUE_WORKSPACE_PATH|RESOLVED" kind="sourcePath" name="src"/>
+						<entry excluding="gps.cpp" flags="VALUE_WORKSPACE_PATH|RESOLVED" kind="sourcePath" name="src"/>
 					</sourceEntries>
 				</configuration>
 			</storageModule>
