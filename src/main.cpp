@@ -43,7 +43,7 @@
 
 #define I2C1_REG reinterpret_cast<i2c::Registers*>(i2c::I2C1)
 
-typedef PB8  LED_RED;
+typedef PB9  LED_RED;
 // typedef PB9  LED_GREEN;
 
 typedef PA0  AD_AC1;  //
@@ -91,21 +91,18 @@ typedef struct
 {
   s64 tick;     // 0x00
   u32 status;   // 0x08
-  u16 control;  // 0x0c
+  u16 control;  // 0x0c has ch_id
   s16 adc_12v;  // 0x0e
   s16 ac_main;  // 0x10
-  s16 pwr[8];   // 0x12
-  s32 enr[8];   // 0x22
-  s16 adc_ref;  // 0x42
-  s16 adc_temp; // 0x44
-  u16 res1;     // 0x46
-  u16 res2;     // 0x48
-  u16 res3;     // 0x4a
-  u16 res4;     // 0x4c
-  u16 res5;     // 0x4e
-  u32 nv_cmd;   // 0x50 NV_CMD_****
-  u32 nv_data;  // 0x54
-  u8 count[4];  // 0x58
+  s16 pwr;      // 0x12 W*10
+  s32 energy ;  // 0x14 W/H
+  s16 adc_ref;  // 0x18
+  s16 adc_temp; // 0x1a
+  u16 res1;     // 0x1c
+  u16 res2;     // 0x1e
+  u32 nv_cmd;   // 0x20 NV_CMD_****
+  u32 nv_data;  // 0x24
+  u8  count[4]; // 0x28
 } REGS;
 
 typedef struct
@@ -136,7 +133,7 @@ const u32 flash_start = (u32)(&__flash_start);
 const u32 flash_end = (u32)(&__flash_end);
 
 volatile u32 dma_count;
-volatile u16 dma_adc_buff[NUM_DMA_ADC*2];
+volatile s16 dma_adc_buff[NUM_DMA_ADC*2];
 
 volatile s64 tick = 0;
 volatile s64 i2c1_wd = 0;
@@ -153,8 +150,8 @@ volatile s16 ref_avg = 2048;
 // Power metering
 volatile s64 rms_main;   // MAIN RMS
 volatile s64 rms_pwr[8]; // CH power RMS
-volatile s32 energy[8];  // CH energy W/sec
-volatile s16 power[8];   // CH power W
+volatile s64 energy[8];  // CH energy W/sec*10
+volatile s16 power[8];   // CH power W*10
 volatile s16 ac_main;    // AC V
 
 inline void* align_ptr(void* adr, u32 align)
@@ -270,9 +267,9 @@ void initializeConf()
     conf.node_id = 0x3FFF;
     conf.kv_12v.k = 26460;
     conf.kv_12v.c = 0;
-    conf.kv_ac.k = 256;
+    conf.kv_ac.k = 185;
     conf.kv_ac.c = 0;
-    conf.kv_in[0].k = 256;
+    conf.kv_in[0].k = 147;
     conf.kv_in[0].c = 0;
     conf.kv_in[1].k = 256;
     conf.kv_in[1].c = 0;
@@ -333,7 +330,7 @@ void initializeTimer()
 {
   // ADC/DMA periodic timer
   TIM2::enableClock();
-  TIM2::configurePeriodicInterrupt<100 /*Hz*/>();
+  TIM2::configurePeriodicInterrupt<1000 /*Hz*/>();
 
   // Sys Clock
   STK::configurePeriodicInterrupt(1000 /*Hz*/);
@@ -554,6 +551,7 @@ u16 sqrt32(u32 n)
     if(c == 0) return g;
     g |= c;
   }
+  return 0;
 }
 
 /*
@@ -571,26 +569,31 @@ void loop()
   s32 ref;
   int i;
 
-  if(tick > timer_t1)
+  if(tick >= timer_t1)
   {
-    timer_t1 = tick + 500;
-    LED_RED::setOutput(LED_RED::isHigh() ? 0 : 1);
-
 	u16 n = (u16)dma_count; dma_count = 0;
     rms = rms_main; rms_main = 0;
     ref = ref_sum; ref_sum = 0;
     memcpy(pw, (const void*)rms_pwr, sizeof(pw));
     memset((void*)rms_pwr, 0, sizeof(rms_pwr));
 
-    if(dma_count != 0) printf("Error: DMA Overlap !!!\n");
+//    if(dma_count != 0) printf("Error: DMA Overlap !!!\n");
 
-    ac_main = (s16)(sqrt32(rms/n) * conf.kv_ac.k/256 + conf.kv_ac.c);
-    ref_avg = ref/n/8;
+    timer_t1 = tick + 500;
+    LED_RED::setOutput(LED_RED::isHigh() ? 0 : 1);
+
+    ac_main = (s16)((sqrt32(rms/n) * conf.kv_ac.k + 512)/1024 + conf.kv_ac.c);
+    ref_avg = ref/n/9;
+
     for(i = 0; i < 8; ++i)
     {
-    	power[i] = (s16)(pw[i]/n * conf.kv_in[i].k/256 + conf.kv_in[i].c);
+//    	power[i] = (s16)(pw[i]/n * conf.kv_in[i].k/1024 + conf.kv_in[i].c);
+//    	power[i] = (s16)(sqrt32(pw[i]/n * conf.kv_in[i].k/1024 * conf.kv_in[i].k/1024) + conf.kv_in[i].c);
+    	power[i] = (s16)(pw[i]/n * conf.kv_ac.k/4096 * conf.kv_in[i].k/1024 + conf.kv_in[i].c);
     	energy[i] += power[i]/2; // loop every 500ms
     }
+
+    printf("AC: %dV, Ch[0]: %.1fW, enrgy: %.3fW/H\n", (int)ac_main, power[0]/10.0, energy[0]/36000.0);
   }
 }
 
@@ -674,6 +677,20 @@ void interrupt::I2C1_EV()
 		{
 			*(data+a) = I2C1::getData();
 			addr++;
+
+			if(addr == 0x0e) // Control word was written
+			{
+				data += a;
+
+				if(*data & 0x08) // Status read
+				{
+					int n;
+					*data &= ~0x08;
+					n = *data & 0x07;
+					regs.pwr = power[n];
+					regs.energy = energy[n]/36000;
+				}
+			}
 		}
 		else
 		{
@@ -711,6 +728,13 @@ void interrupt::I2C1_ER()
 void interrupt::TIM2()
 {
   TIM2::clearUpdateFlag();
+  // Start new conversion
+  DMA_ADC1::enablePeripheral();
+  ADC2::enablePeripheral();
+  ADC1::enablePeripheral();
+
+  ++tick;
+
 }
 
 void interrupt::DMA1_Channel1()
@@ -723,27 +747,25 @@ void interrupt::DMA1_Channel1()
 
   v = dma_adc_buff[8] - ref_avg;
   rms_main += v * v;
+  ref_sum += dma_adc_buff[8];
 
   for(i = 0; i < 8; ++i)
   {
-    c = dma_adc_buff[i] - ref_avg;
+	c = dma_adc_buff[i] - ref_avg;
     rms_pwr[i] += v * c;
-    ref_sum += c;
+    ref_sum += dma_adc_buff[i];
   }
 
+#if 0
   regs.adc_12v = (s16)((s32)conf.kv_12v.k * dma_adc_buff[0]/2048 + conf.kv_12v.c);
   regs.adc_temp = (s16)((s32)conf.kv_temp.k * dma_adc_buff[5]/8192 + conf.kv_temp.c);
   regs.adc_ref = (s16)((s32)conf.kv_ref.k * dma_adc_buff[6]/8192 + conf.kv_ref.c);
-
+#endif
   DMA_ADC1::disablePeripheral();
   DMA_ADC1::setNumberOfTransactions(NUM_DMA_ADC);
 }
 
 extern "C" void SysTick()
 {
-  ++tick;
-  // Start new conversion
-  DMA_ADC1::enablePeripheral();
-  ADC2::enablePeripheral();
-  ADC1::enablePeripheral();
+//  ++tick;
 }
