@@ -43,7 +43,7 @@
 
 #define I2C1_REG reinterpret_cast<i2c::Registers*>(i2c::I2C1)
 
-typedef PB8  LED_RED;
+typedef PB9  LED_RED;
 // typedef PB9  LED_GREEN;
 
 typedef PA0  AD_AC1;  //

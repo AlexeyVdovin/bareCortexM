@@ -1,6 +1,6 @@
 target=bareCortexM
 
-OBJ=src/startup.o src/main.o src/exception.o src/interrupt.o src/system_call.o
+OBJ=src/startup.o src/exception.o src/interrupt.o src/main.o src/system_call.o
 
 MCU=stm32f103c8t6
 DEBUG=-O0 -g -ggdb
