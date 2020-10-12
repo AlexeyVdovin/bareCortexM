@@ -30,7 +30,7 @@ typedef void (* pvf)();
 extern "C" void resetHandler();
 
 namespace exception {
-  __attribute__ ((section(".exception_vector")))
+  __attribute__ ((section(".exception_vector"),used))
     pvf exceptionVector[] = {
     pvf(&__StackTop),  // 0x0000
     resetHandler,// 0x0004

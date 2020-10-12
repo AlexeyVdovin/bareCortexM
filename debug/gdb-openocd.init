@@ -1,0 +1,10 @@
+# copy this file to .gdbinit in your Firmware tree
+
+# this sets up gdb to use openocd. You must start openocd first
+target extended-remote :3333
+
+set mem inaccessible-by-default off
+set print pretty
+
+b HardFault_ExceptionHandler
+set confirm off
