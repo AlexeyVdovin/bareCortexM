@@ -43,7 +43,7 @@
 
 #define I2C1_REG reinterpret_cast<i2c::Registers*>(i2c::I2C1)
 
-typedef PB9  LED_RED;
+typedef PB12  LED_RED;
 // typedef PB9  LED_GREEN;
 
 typedef PA0  AD_AC1;  //
@@ -329,8 +329,8 @@ void initializeUsart1()
 void initializeTimer()
 {
   // ADC/DMA periodic timer
-  TIM2::enableClock();
-  TIM2::configurePeriodicInterrupt<1000 /*Hz*/>();
+  // TIM2::enableClock();
+  // TIM2::configurePeriodicInterrupt<1000 /*Hz*/>();
 
   // Sys Clock
   STK::configurePeriodicInterrupt(1000 /*Hz*/);
@@ -532,10 +532,10 @@ void initializePeripherals()
   initializeConf();
   initializeTimer();
   initializeI2c();
-  initializeAdc();
-  initializeDma();
+//  initializeAdc();
+//  initializeDma();
 
-  TIM2::startCounter();
+//  TIM2::startCounter();
 }
 
 
@@ -571,17 +571,18 @@ void loop()
 
   if(tick >= timer_t1)
   {
+#if 0
 	u16 n = (u16)dma_count; dma_count = 0;
     rms = rms_main; rms_main = 0;
     ref = ref_sum; ref_sum = 0;
     memcpy(pw, (const void*)rms_pwr, sizeof(pw));
     memset((void*)rms_pwr, 0, sizeof(rms_pwr));
-
+#endif
 //    if(dma_count != 0) printf("Error: DMA Overlap !!!\n");
 
     timer_t1 = tick + 500;
     LED_RED::setOutput(LED_RED::isHigh() ? 0 : 1);
-
+#if 0
     ac_main = (s16)((sqrt32(rms/n) * conf.kv_ac.k + 512)/1024 + conf.kv_ac.c);
     ref_avg = ref/n/9;
 
@@ -594,6 +595,7 @@ void loop()
     }
 
     printf("AC: %dV, Ch[0]: %.1fW, enrgy: %.3fW/H\n", (int)ac_main, power[0]/10.0, energy[0]/36000.0);
+#endif
   }
 }
 
@@ -767,5 +769,5 @@ void interrupt::DMA1_Channel1()
 
 extern "C" void SysTick()
 {
-//  ++tick;
+  ++tick;
 }

@@ -11,9 +11,10 @@
             "request": "launch",
             "type": "cortex-debug",
             "servertype": "openocd",
-            "svdFile": "STM32F429.svd",
+            "svdFile": "debug/STM32F103xx.svd",
             "configFiles": [
-                "./openocd/stm32f1-stlink2.cfg"
+                "interface/stlink-v2.cfg",
+                "target/stm32f1x.cfg"
             ]
         }
     ]
