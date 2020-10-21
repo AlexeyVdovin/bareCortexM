@@ -38,41 +38,59 @@
 #include "core/stk.hpp"
 
 #define UART1_BAUD_RATE 9600
+#define UART2_BAUD_RATE 9600
 #define I2C_SLAVE_ADDR  0x30
 
 
 #define I2C1_REG reinterpret_cast<i2c::Registers*>(i2c::I2C1)
 
 typedef PB12  LED_RED;
-// typedef PB9  LED_GREEN;
 
-typedef PA0  AD_AC1;  //
-typedef PA1  AD_AC3;  //
-typedef PA2  AD_AC7;  //
-typedef PA3  AD_AC5;  //
-typedef PA4  AD_MAIN; // AC_MAIN
-typedef PA5  AD_AC8;  //
-typedef PA6  AD_AC6;  //
-typedef PA7  AD_AC4;  //
-typedef PB0  AD_AC2;  //
+typedef PA0  AD_IN2;  
+typedef PA1  AD_IN1;  
+typedef PB0  AD_12V; 
 
-typedef PB1  AD_12V;  // DC IN
-//           AD_TEMP; // IN16
-//           AD_REF;  // IN17
+typedef PA2  RELAY_X6;  
+typedef PA3  RELAY_X5;  
+typedef PA4  RELAY_X4;  
+typedef PA5  RELAY_X3;  
+typedef PA6  RELAY_X2;  
+typedef PA7  RELAY_X1;  
+
+typedef PA8  EN_1W1;
+typedef PA11 EN_1W2;
+typedef PA12 EN_1W3;
+typedef PA15 EN_1W4;
+
+typedef PC13 ADR0;     // IN
+typedef PC14 ADR1;     // IN
+typedef PC15 ADR2;     // IN
+
+typedef PB1  VDD_OK;   // IN
+typedef PB2  VDD_EN;   // PP
+
+typedef PB3  EE_WP;    // PP
+
+typedef PB9  PWM1;     // PP
+typedef PB8  PWM2;     // PP
+
+enum {
+  PWM1_OC = 4,
+  PWM2_OC = 3,
+};
+
+typedef PA9   U1TX;    // PP
+typedef PA10  U1RX;    // IN
+
+typedef PB10   U2TX;   // PP
+typedef PB11   U2RX;   // IN
+typedef PB14   U2DE;   // PP
+typedef PB15   U2RE;   // PP
+
+typedef PB6   SCL;     // OD
+typedef PB7   SDA;     // OD
 
 typedef DMA1_CHANNEL1 DMA_ADC1;
-
-typedef PA9   U1TX;   // PP
-typedef PA10  U1RX;   // IN
-
-typedef PB6   SCL;    // OD
-typedef PB7   SDA;    // OD
-
-typedef PB13  ADR0;   // IN
-typedef PB14  ADR1;   // IN
-typedef PB15  ADR2;   // IN
-
-typedef PB5   I2C_INT; // IN
 
 enum {
 	NV_CMD_READ  = 0x10000000,
@@ -82,9 +100,11 @@ enum {
 };
 
 enum {
-	CTRL_EXT_RST	= 0x8000,
-	CTRL_OPT_EN		= 0x0100,
-	CTRL_LED_ON		= 0x0001
+	CTRL_1W1_EN		= 0x0001,
+	CTRL_1W2_EN		= 0x0002,
+	CTRL_1W3_EN		= 0x0004,
+	CTRL_1W4_EN		= 0x0008,
+	CTRL_VDD_EN		= 0x0010,
 };
 
 typedef struct
@@ -93,13 +113,15 @@ typedef struct
   u32 status;   // 0x08
   u16 control;  // 0x0c has ch_id
   s16 adc_12v;  // 0x0e
-  s16 ac_main;  // 0x10
-  s16 pwr;      // 0x12 W*10
-  s32 energy ;  // 0x14 W/H
+  s16 adc_in0;  // 0x10
+  s16 adc_in1;  // 0x12
+  s32 reserved; // 0x14
   s16 adc_ref;  // 0x18
   s16 adc_temp; // 0x1a
-  u16 res1;     // 0x1c
-  u16 res2;     // 0x1e
+  u16 pwm1;     // 0x1c
+  u16 pwm2;     // 0x1e
+  u64 sw_id;    // 1W id
+  s16 sw_temp;  // 1W temp in 1/100C
   u32 nv_cmd;   // 0x20 NV_CMD_****
   u32 nv_data;  // 0x24
   u8  count[4]; // 0x28
@@ -116,15 +138,14 @@ typedef struct
   u16 i2c_id;
   u16 node_id;
   kv_t kv_12v;
-  kv_t kv_ac;
-  kv_t kv_in[8];
+  kv_t kv_in[2];
   kv_t kv_ref;
   kv_t kv_temp;
   u32 crc;
 } CONF;
 
 
-enum { NUM_DMA_ADC = 6 };
+enum { NUM_DMA_ADC = 5 };
 
 extern const u32 __flash_start;
 extern const u32 __flash_end;
@@ -133,7 +154,7 @@ const u32 flash_start = (u32)(&__flash_start);
 const u32 flash_end = (u32)(&__flash_end);
 
 volatile u32 dma_count;
-volatile s16 dma_adc_buff[NUM_DMA_ADC*2];
+volatile s16 dma_adc_buff[NUM_DMA_ADC];
 
 volatile s64 tick = 0;
 volatile s64 i2c1_wd = 0;
@@ -143,16 +164,6 @@ volatile CONF conf; // Copy from nv_conf
 CONF* conf1;
 CONF* conf2;
 volatile u16 control;
-
-volatile s32 ref_sum = 0;
-volatile s16 ref_avg = 2048;
-
-// Power metering
-volatile s64 rms_main;   // MAIN RMS
-volatile s64 rms_pwr[8]; // CH power RMS
-volatile s64 energy[8];  // CH energy W/sec*10
-volatile s16 power[8];   // CH power W*10
-volatile s16 ac_main;    // AC V
 
 inline void* align_ptr(void* adr, u32 align)
 {
@@ -174,6 +185,40 @@ void initializeGpio()
 
   LED_RED::setHigh();
   LED_RED::setMode(gpio::cr::GP_PUSH_PULL_2MHZ);
+
+  RELAY_X1::setLow();
+  RELAY_X1::setMode(gpio::cr::GP_PUSH_PULL_2MHZ);
+  RELAY_X2::setLow();
+  RELAY_X2::setMode(gpio::cr::GP_PUSH_PULL_2MHZ);
+  RELAY_X3::setLow();
+  RELAY_X3::setMode(gpio::cr::GP_PUSH_PULL_2MHZ);
+  RELAY_X4::setLow();
+  RELAY_X4::setMode(gpio::cr::GP_PUSH_PULL_2MHZ);
+  RELAY_X5::setLow();
+  RELAY_X5::setMode(gpio::cr::GP_PUSH_PULL_2MHZ);
+  RELAY_X6::setLow();
+  RELAY_X6::setMode(gpio::cr::GP_PUSH_PULL_2MHZ);
+
+  EN_1W1::setHigh();
+  EN_1W1::setMode(gpio::cr::GP_PUSH_PULL_2MHZ);
+  EN_1W2::setHigh();
+  EN_1W2::setMode(gpio::cr::GP_PUSH_PULL_2MHZ);
+  EN_1W3::setHigh();
+  EN_1W3::setMode(gpio::cr::GP_PUSH_PULL_2MHZ);
+  EN_1W4::setHigh();
+  EN_1W4::setMode(gpio::cr::GP_PUSH_PULL_2MHZ);
+
+  ADR0::setMode(gpio::cr::FLOATING_INPUT);
+  ADR1::setMode(gpio::cr::FLOATING_INPUT);
+  ADR2::setMode(gpio::cr::FLOATING_INPUT);
+
+  VDD_EN::setHigh();
+  VDD_EN::setMode(gpio::cr::GP_PUSH_PULL_2MHZ);
+  VDD_OK::setMode(gpio::cr::FLOATING_INPUT);
+
+  EE_WP::setHigh();
+  EE_WP::setMode(gpio::cr::GP_PUSH_PULL_2MHZ);
+
 }
 
 void conf_write(CONF* dst, volatile CONF* src)
@@ -267,24 +312,10 @@ void initializeConf()
     conf.node_id = 0x3FFF;
     conf.kv_12v.k = 26460;
     conf.kv_12v.c = 0;
-    conf.kv_ac.k = 185;
-    conf.kv_ac.c = 0;
     conf.kv_in[0].k = 147;
     conf.kv_in[0].c = 0;
     conf.kv_in[1].k = 256;
     conf.kv_in[1].c = 0;
-    conf.kv_in[2].k = 256;
-    conf.kv_in[2].c = 0;
-    conf.kv_in[3].k = 256;
-    conf.kv_in[3].c = 0;
-    conf.kv_in[4].k = 256;
-    conf.kv_in[4].c = 0;
-    conf.kv_in[5].k = 256;
-    conf.kv_in[5].c = 0;
-    conf.kv_in[6].k = 256;
-    conf.kv_in[6].c = 0;
-    conf.kv_in[7].k = 256;
-    conf.kv_in[7].c = 0;
     conf.kv_ref.k = 8192;
     conf.kv_ref.c = 0;
     conf.kv_temp.k = 8192; // TODO: Set correct default Temperature conversion constants
@@ -326,11 +357,67 @@ void initializeUsart1()
   U1RX::pullUp();
 }
 
+void initializeUsart2()
+{
+  USART3::enableClock();
+  USART3::configure(
+      usart::cr1::rwu::RECEIVER_IN_ACTIVE_MODE,
+      usart::cr1::re::RECEIVER_ENABLED,
+      usart::cr1::te::TRANSMITTER_ENABLED,
+      usart::cr1::idleie::IDLE_INTERRUPT_DISABLED,
+      usart::cr1::rxneie::RXNE_ORE_INTERRUPT_DISABLED,
+      usart::cr1::tcie::TC_INTERRUPT_DISABLED,
+      usart::cr1::txeie::TXEIE_INTERRUPT_DISABLED,
+      usart::cr1::peie::PEIE_INTERRUPT_DISABLED,
+      usart::cr1::ps::EVEN_PARITY,
+      usart::cr1::pce::PARITY_CONTROL_DISABLED,
+      usart::cr1::wake::WAKE_ON_IDLE_LINE,
+      usart::cr1::m::START_8_DATA_N_STOP,
+      usart::cr1::ue::USART_ENABLED,
+      usart::cr1::over8::OVERSAMPLING_BY_16,
+      usart::cr2::stop::_1_STOP_BIT,
+      usart::cr3::eie::ERROR_INTERRUPT_DISABLED,
+      usart::cr3::hdsel::FULL_DUPLEX,
+      usart::cr3::dmar::RECEIVER_DMA_DISABLED,
+      usart::cr3::dmat::TRANSMITTER_DMA_DISABLED,
+      usart::cr3::rtse::RTS_HARDWARE_FLOW_DISABLED,
+      usart::cr3::ctse::CTS_HARDWARE_FLOW_DISABLED,
+      usart::cr3::ctsie::CTS_INTERRUPT_DISABLED,
+      usart::cr3::onebit::ONE_SAMPLE_BIT_METHOD);
+  USART3::setBaudRate<UART2_BAUD_RATE /* bps */ >();
+  U2RE::setMode(gpio::cr::AF_PUSH_PULL_2MHZ);
+  U2DE::setMode(gpio::cr::AF_PUSH_PULL_2MHZ);
+  U2TX::setMode(gpio::cr::AF_PUSH_PULL_2MHZ);
+  U2RX::setMode(gpio::cr::INPUT_PULL_X);
+  U2RX::pullUp();
+}
+
 void initializeTimer()
 {
   // ADC/DMA periodic timer
-  // TIM2::enableClock();
-  // TIM2::configurePeriodicInterrupt<1000 /*Hz*/>();
+  TIM2::enableClock();
+  TIM2::configurePeriodicInterrupt<100 /*Hz*/>();
+
+  // PWM timer
+  TIM4::enableClock();
+  TIM4::configurePwm<12000000, 100>();
+
+  TIM4::configurePwmOutput<PWM1_OC>(
+      tim::ccer::cce::ENABLED,
+      tim::ccer::ccp::RISING_EDGE_ACTIVE_HIGH,
+      tim::occmr::ocm::PWM_MODE_1);
+  TIM4::configurePwmOutput<PWM2_OC>(
+      tim::ccer::cce::ENABLED,
+      tim::ccer::ccp::RISING_EDGE_ACTIVE_HIGH,
+      tim::occmr::ocm::PWM_MODE_1);
+
+  TIM4::setPulse<PWM1_OC>(20);
+  TIM4::setPulse<PWM2_OC>(50);
+
+  PWM1::setLow();
+  PWM1::setMode(gpio::cr::AF_PUSH_PULL_50MHZ);
+  PWM2::setLow();
+  PWM2::setMode(gpio::cr::AF_PUSH_PULL_50MHZ);
 
   // Sys Clock
   STK::configurePeriodicInterrupt(1000 /*Hz*/);
@@ -363,34 +450,8 @@ void initializeI2c()
 void initializeAdc()
 {
   ADC1::enableClock();
-  ADC2::enableClock();
 
   ADC1::configure(
-    adc::cr1::awdch::SET_ANALOG_WATCHDOG_ON_CHANNEL0,
-    adc::cr1::eocie::END_OF_CONVERSION_INTERRUPT_DISABLED,
-    adc::cr1::awdie::ANALOG_WATCHDOG_INTERRUPT_DISABLED,
-    adc::cr1::jeocie::END_OF_ALL_INJECTED_CONVERSIONS_INTERRUPT_DISABLED,
-    adc::cr1::scan::SCAN_MODE_ENABLED,
-    adc::cr1::awdsgl::ANALOG_WATCHDOG_ENABLED_ON_ALL_CHANNELS,
-    adc::cr1::jauto::AUTOMATIC_INJECTED_CONVERSION_DISABLED,
-    adc::cr1::discen::DISCONTINUOUS_MODE_ON_REGULAR_CHANNELS_DISABLED,
-    adc::cr1::jdiscen::DISCONTINUOUS_MODE_ON_INJECTED_CHANNELS_DISABLED,
-    adc::cr1::discnum::_1_CHANNEL_FOR_DISCONTINUOUS_MODE,
-    adc::cr1::dualmod::DUALMODE_REGSIMULT_MODE,
-    adc::cr1::jawden::ANALOG_WATCHDOG_DISABLED_ON_INJECTED_CHANNELS,
-    adc::cr1::awden::ANALOG_WATCHDOG_DISABLED_ON_REGULAR_CHANNELS,
-    adc::cr2::adon::ADC_ENABLED,
-    adc::cr2::cont::SINGLE_CONVERSION_MODE,
-    adc::cr2::dma::DMA_MODE_ENABLED,
-    adc::cr2::align::RIGTH_ALIGNED_DATA,
-    adc::cr2::jextsel::INJECTED_GROUP_TRIGGERED_BY_TIMER1_TRGO,
-    adc::cr2::jexten::INJECTED_TRIGGER_DISABLED,
-    adc::cr2::jswstart::INJECTED_CHANNELS_ON_RESET_STATE,
-    adc::cr2::extsel::REGULAR_GROUP_TRIGGERED_BY_SWSTART,
-    adc::cr2::exten::REGULAR_TRIGGER_ENABLED,
-    adc::cr2::swstart::START_CONVERSION_ON_REGULAR_CHANNELS,
-    adc::cr2::tsvrefe::TEMPERATURE_SENSOR_ENABLED);
-  ADC2::configure(
     adc::cr1::awdch::SET_ANALOG_WATCHDOG_ON_CHANNEL0,
     adc::cr1::eocie::END_OF_CONVERSION_INTERRUPT_DISABLED,
     adc::cr1::awdie::ANALOG_WATCHDOG_INTERRUPT_DISABLED,
@@ -406,9 +467,9 @@ void initializeAdc()
     adc::cr1::awden::ANALOG_WATCHDOG_DISABLED_ON_REGULAR_CHANNELS,
     adc::cr2::adon::ADC_ENABLED,
     adc::cr2::cont::SINGLE_CONVERSION_MODE,
-    adc::cr2::dma::DMA_MODE_DISABLED,
+    adc::cr2::dma::DMA_MODE_ENABLED,
     adc::cr2::align::RIGTH_ALIGNED_DATA,
-    adc::cr2::jextsel::INJECTED_GROUP_TRIGGERED_BY_TIMER1_CC4,
+    adc::cr2::jextsel::INJECTED_GROUP_TRIGGERED_BY_TIMER1_TRGO,
     adc::cr2::jexten::INJECTED_TRIGGER_DISABLED,
     adc::cr2::jswstart::INJECTED_CHANNELS_ON_RESET_STATE,
     adc::cr2::extsel::REGULAR_GROUP_TRIGGERED_BY_SWSTART,
@@ -416,72 +477,36 @@ void initializeAdc()
     adc::cr2::swstart::START_CONVERSION_ON_REGULAR_CHANNELS,
     adc::cr2::tsvrefe::TEMPERATURE_SENSOR_ENABLED);
 
-  ADC1::setConversionTime<0, adc::smp::SAMPLING_TIME_13_5_CYCLES>();
-  ADC1::setConversionTime<1, adc::smp::SAMPLING_TIME_13_5_CYCLES>();
-  ADC1::setConversionTime<2, adc::smp::SAMPLING_TIME_13_5_CYCLES>();
-  ADC1::setConversionTime<3, adc::smp::SAMPLING_TIME_13_5_CYCLES>();
-  ADC1::setConversionTime<4, adc::smp::SAMPLING_TIME_13_5_CYCLES>();
-  ADC1::setConversionTime<5, adc::smp::SAMPLING_TIME_13_5_CYCLES>();
-  ADC1::setConversionTime<6, adc::smp::SAMPLING_TIME_13_5_CYCLES>();
-  ADC1::setConversionTime<7, adc::smp::SAMPLING_TIME_13_5_CYCLES>();
-  ADC1::setConversionTime<8, adc::smp::SAMPLING_TIME_13_5_CYCLES>();
-  ADC1::setConversionTime<9, adc::smp::SAMPLING_TIME_13_5_CYCLES>();
-  ADC1::setConversionTime<10, adc::smp::SAMPLING_TIME_13_5_CYCLES>();
-  ADC1::setConversionTime<11, adc::smp::SAMPLING_TIME_13_5_CYCLES>();
-  ADC1::setConversionTime<12, adc::smp::SAMPLING_TIME_13_5_CYCLES>();
-  ADC1::setConversionTime<13, adc::smp::SAMPLING_TIME_13_5_CYCLES>();
-  ADC1::setConversionTime<14, adc::smp::SAMPLING_TIME_13_5_CYCLES>();
-  ADC1::setConversionTime<15, adc::smp::SAMPLING_TIME_13_5_CYCLES>();
-  ADC1::setConversionTime<16, adc::smp::SAMPLING_TIME_13_5_CYCLES>();
-  ADC1::setConversionTime<17, adc::smp::SAMPLING_TIME_13_5_CYCLES>();
+  ADC1::setConversionTime<0, adc::smp::SAMPLING_TIME_55_5_CYCLES>();
+  ADC1::setConversionTime<1, adc::smp::SAMPLING_TIME_55_5_CYCLES>();
+  ADC1::setConversionTime<2, adc::smp::SAMPLING_TIME_55_5_CYCLES>();
+  ADC1::setConversionTime<3, adc::smp::SAMPLING_TIME_55_5_CYCLES>();
+  ADC1::setConversionTime<4, adc::smp::SAMPLING_TIME_55_5_CYCLES>();
+  ADC1::setConversionTime<5, adc::smp::SAMPLING_TIME_55_5_CYCLES>();
+  ADC1::setConversionTime<6, adc::smp::SAMPLING_TIME_55_5_CYCLES>();
+  ADC1::setConversionTime<7, adc::smp::SAMPLING_TIME_55_5_CYCLES>();
+  ADC1::setConversionTime<8, adc::smp::SAMPLING_TIME_55_5_CYCLES>();
+  ADC1::setConversionTime<9, adc::smp::SAMPLING_TIME_55_5_CYCLES>();
+  ADC1::setConversionTime<10, adc::smp::SAMPLING_TIME_55_5_CYCLES>();
+  ADC1::setConversionTime<11, adc::smp::SAMPLING_TIME_55_5_CYCLES>();
+  ADC1::setConversionTime<12, adc::smp::SAMPLING_TIME_55_5_CYCLES>();
+  ADC1::setConversionTime<13, adc::smp::SAMPLING_TIME_55_5_CYCLES>();
+  ADC1::setConversionTime<14, adc::smp::SAMPLING_TIME_55_5_CYCLES>();
+  ADC1::setConversionTime<15, adc::smp::SAMPLING_TIME_55_5_CYCLES>();
+  ADC1::setConversionTime<16, adc::smp::SAMPLING_TIME_55_5_CYCLES>();
+  ADC1::setConversionTime<17, adc::smp::SAMPLING_TIME_55_5_CYCLES>();
 
-  ADC2::setConversionTime<0, adc::smp::SAMPLING_TIME_13_5_CYCLES>();
-  ADC2::setConversionTime<1, adc::smp::SAMPLING_TIME_13_5_CYCLES>();
-  ADC2::setConversionTime<2, adc::smp::SAMPLING_TIME_13_5_CYCLES>();
-  ADC2::setConversionTime<3, adc::smp::SAMPLING_TIME_13_5_CYCLES>();
-  ADC2::setConversionTime<4, adc::smp::SAMPLING_TIME_13_5_CYCLES>();
-  ADC2::setConversionTime<5, adc::smp::SAMPLING_TIME_13_5_CYCLES>();
-  ADC2::setConversionTime<6, adc::smp::SAMPLING_TIME_13_5_CYCLES>();
-  ADC2::setConversionTime<7, adc::smp::SAMPLING_TIME_13_5_CYCLES>();
-  ADC2::setConversionTime<8, adc::smp::SAMPLING_TIME_13_5_CYCLES>();
-  ADC2::setConversionTime<9, adc::smp::SAMPLING_TIME_13_5_CYCLES>();
-  ADC2::setConversionTime<10, adc::smp::SAMPLING_TIME_13_5_CYCLES>();
-  ADC2::setConversionTime<11, adc::smp::SAMPLING_TIME_13_5_CYCLES>();
-  ADC2::setConversionTime<12, adc::smp::SAMPLING_TIME_13_5_CYCLES>();
-  ADC2::setConversionTime<13, adc::smp::SAMPLING_TIME_13_5_CYCLES>();
-  ADC2::setConversionTime<14, adc::smp::SAMPLING_TIME_13_5_CYCLES>();
-  ADC2::setConversionTime<15, adc::smp::SAMPLING_TIME_13_5_CYCLES>();
-  ADC2::setConversionTime<16, adc::smp::SAMPLING_TIME_13_5_CYCLES>();
-  ADC2::setConversionTime<17, adc::smp::SAMPLING_TIME_13_5_CYCLES>();
-
-  ADC1::setRegularSequenceOrder<1, 0>();
-  ADC1::setRegularSequenceOrder<2, 2>();
-  ADC1::setRegularSequenceOrder<3, 5>();
-  ADC1::setRegularSequenceOrder<4, 7>();
-  ADC1::setRegularSequenceOrder<5, 4>();  // AC MAIN
-  ADC1::setRegularSequenceOrder<6, 16>(); // AD_TEMP
+  ADC1::setRegularSequenceOrder<1, 1>();  // A_IN0
+  ADC1::setRegularSequenceOrder<2, 0>();  // A_IN1
+  ADC1::setRegularSequenceOrder<3, 8>();  // ADC_12V
+  ADC1::setRegularSequenceOrder<4, 16>(); // AD_TEMP
+  ADC1::setRegularSequenceOrder<5, 17>(); // AD_REF
 
   ADC1::setNumberOfRegularChannels<NUM_DMA_ADC>();
 
-  ADC2::setRegularSequenceOrder<1, 1>();
-  ADC2::setRegularSequenceOrder<2, 3>();
-  ADC2::setRegularSequenceOrder<3, 6>();
-  ADC2::setRegularSequenceOrder<4, 8>();
-  ADC2::setRegularSequenceOrder<5, 9>();  // DC 12V
-  ADC2::setRegularSequenceOrder<6, 17>(); // AD_REF
-
-  ADC2::setNumberOfRegularChannels<NUM_DMA_ADC>();
-
   AD_12V::setMode(gpio::cr::ANALOG_INPUT);
-  AD_MAIN::setMode(gpio::cr::ANALOG_INPUT);
-  AD_AC1::setMode(gpio::cr::ANALOG_INPUT);
-  AD_AC2::setMode(gpio::cr::ANALOG_INPUT);
-  AD_AC3::setMode(gpio::cr::ANALOG_INPUT);
-  AD_AC4::setMode(gpio::cr::ANALOG_INPUT);
-  AD_AC5::setMode(gpio::cr::ANALOG_INPUT);
-  AD_AC6::setMode(gpio::cr::ANALOG_INPUT);
-  AD_AC7::setMode(gpio::cr::ANALOG_INPUT);
-  AD_AC8::setMode(gpio::cr::ANALOG_INPUT);
+  AD_IN1::setMode(gpio::cr::ANALOG_INPUT);
+  AD_IN2::setMode(gpio::cr::ANALOG_INPUT);
 
   ADC1::disablePeripheral();
   delay(10);
@@ -490,14 +515,6 @@ void initializeAdc()
   while(!ADC1::hasCalibrationInitialized()) delay(10);
   ADC1::startCalibration();
   while(!ADC1::hasCalibrationEnded()) delay(10);
-
-  ADC2::disablePeripheral();
-  delay(10);
-  ADC2::enablePeripheral();
-  ADC2::resetCalibration();
-  while(!ADC2::hasCalibrationInitialized()) delay(10);
-  ADC2::startCalibration();
-  while(!ADC2::hasCalibrationEnded()) delay(10);
 }
 
 void initializeDma()
@@ -514,8 +531,8 @@ void initializeDma()
       dma::channel::cr::circ::CIRCULAR_MODE_DISABLED,
       dma::channel::cr::pinc::PERIPHERAL_INCREMENT_MODE_DISABLED,
       dma::channel::cr::minc::MEMORY_INCREMENT_MODE_ENABLED,
-      dma::channel::cr::psize::PERIPHERAL_SIZE_32BITS,
-      dma::channel::cr::msize::MEMORY_SIZE_32BITS,
+      dma::channel::cr::psize::PERIPHERAL_SIZE_16BITS,
+      dma::channel::cr::msize::MEMORY_SIZE_16BITS,
       dma::channel::cr::pl::CHANNEL_PRIORITY_LEVEL_LOW,
       dma::channel::cr::mem2mem::MEMORY_TO_MEMORY_MODE_DISABLED);
   DMA_ADC1::setMemoryAddress((void*)dma_adc_buff);
@@ -529,13 +546,15 @@ void initializePeripherals()
 {
   initializeGpio();
   initializeUsart1();
+  initializeUsart2();
   initializeConf();
   initializeTimer();
   initializeI2c();
-//  initializeAdc();
-//  initializeDma();
+  initializeAdc();
+  initializeDma();
 
-//  TIM2::startCounter();
+  TIM2::startCounter();
+  TIM4::startCounter();
 }
 
 
@@ -553,13 +572,6 @@ u16 sqrt32(u32 n)
   }
   return 0;
 }
-
-/*
- * 	CTRL_EXT_RST	= 0x8000,
-	CTRL_OPT_EN		= 0x0100,
-	CTRL_LED_ON		= 0x0001
- *
- */
 
 void loop()
 {
@@ -689,8 +701,8 @@ void interrupt::I2C1_EV()
 					int n;
 					*data &= ~0x08;
 					n = *data & 0x07;
-					regs.pwr = power[n];
-					regs.energy = energy[n]/36000;
+					//regs.pwr = power[n];
+					//regs.energy = energy[n]/36000;
 				}
 			}
 		}
@@ -732,37 +744,14 @@ void interrupt::TIM2()
   TIM2::clearUpdateFlag();
   // Start new conversion
   DMA_ADC1::enablePeripheral();
-  ADC2::enablePeripheral();
   ADC1::enablePeripheral();
-
-  ++tick;
-
 }
 
 void interrupt::DMA1_Channel1()
 {
-  register s16 v, c;
-  int i;
-
   ++dma_count;
   DMA_ADC1::clearGlobalFlag();
 
-  v = dma_adc_buff[8] - ref_avg;
-  rms_main += v * v;
-  ref_sum += dma_adc_buff[8];
-
-  for(i = 0; i < 8; ++i)
-  {
-	c = dma_adc_buff[i] - ref_avg;
-    rms_pwr[i] += v * c;
-    ref_sum += dma_adc_buff[i];
-  }
-
-#if 0
-  regs.adc_12v = (s16)((s32)conf.kv_12v.k * dma_adc_buff[0]/2048 + conf.kv_12v.c);
-  regs.adc_temp = (s16)((s32)conf.kv_temp.k * dma_adc_buff[5]/8192 + conf.kv_temp.c);
-  regs.adc_ref = (s16)((s32)conf.kv_ref.k * dma_adc_buff[6]/8192 + conf.kv_ref.c);
-#endif
   DMA_ADC1::disablePeripheral();
   DMA_ADC1::setNumberOfTransactions(NUM_DMA_ADC);
 }
