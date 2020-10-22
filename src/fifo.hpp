@@ -22,22 +22,29 @@ enum usart_fifo_error
 template <typename USART, u8 rx_buff_size, u8 tx_buff_size> class usart_fifo
 {
 public:
+ 	volatile static u8 rx_last_error;
 	enum rx_buffer_size { RX_BUFFER_SIZE = rx_buff_size };
 	enum tx_buffer_size { TX_BUFFER_SIZE = tx_buff_size };
-	volatile static u8 rx_last_error;
 	volatile static u8 rx_buffer[RX_BUFFER_SIZE];
-	volatile static u8 rx_buffer_head;
-	volatile static u8 rx_buffer_tail;
+	volatile static u8 rx_head;
+	volatile static u8 rx_tail;
+	volatile static bool rx_full;
 	volatile static u8 tx_buffer[TX_BUFFER_SIZE];
-	volatile static u8 tx_buffer_head;
-	volatile static u8 tx_buffer_tail;
+	volatile static u8 tx_head;
+	volatile static u8 tx_tail;
+	volatile static bool tx_full;
 
-	static inline int rx_getchar();
-	static inline int tx_putchar(u8 c);
-	static inline int rx_count();
+    static inline void inc_rx_head();
+	static inline void inc_rx_tail();
+	static inline bool is_rx_empty();
+	static inline void rx_put(u8 c);
+	static inline int  rx_get();
 
-	static inline int rx_put(u8 c);
-	static inline int tx_char();
+    static inline void inc_tx_head();
+	static inline void inc_tx_tail();
+	static inline bool is_tx_empty();
+	static inline void tx_put(u8 c);
+	static inline int  tx_get();
 
 	static inline void init();
 private:
@@ -45,85 +52,110 @@ private:
 };
 
 template <typename USART, u8 rx_buff_size, u8 tx_buff_size> volatile u8 usart_fifo<USART, rx_buff_size, tx_buff_size>::rx_last_error;
-template <typename USART, u8 rx_buff_size, u8 tx_buff_size> volatile u8 usart_fifo<USART, rx_buff_size, tx_buff_size>::rx_buffer_head;
-template <typename USART, u8 rx_buff_size, u8 tx_buff_size> volatile u8 usart_fifo<USART, rx_buff_size, tx_buff_size>::rx_buffer_tail;
+
 template <typename USART, u8 rx_buff_size, u8 tx_buff_size> volatile u8 usart_fifo<USART, rx_buff_size, tx_buff_size>::rx_buffer[RX_BUFFER_SIZE];
+template <typename USART, u8 rx_buff_size, u8 tx_buff_size> volatile u8 usart_fifo<USART, rx_buff_size, tx_buff_size>::rx_head;
+template <typename USART, u8 rx_buff_size, u8 tx_buff_size> volatile u8 usart_fifo<USART, rx_buff_size, tx_buff_size>::rx_tail;
+template <typename USART, u8 rx_buff_size, u8 tx_buff_size> volatile bool usart_fifo<USART, rx_buff_size, tx_buff_size>::rx_full;
+
 template <typename USART, u8 rx_buff_size, u8 tx_buff_size> volatile u8 usart_fifo<USART, rx_buff_size, tx_buff_size>::tx_buffer[TX_BUFFER_SIZE];
-template <typename USART, u8 rx_buff_size, u8 tx_buff_size> volatile u8 usart_fifo<USART, rx_buff_size, tx_buff_size>::tx_buffer_head;
-template <typename USART, u8 rx_buff_size, u8 tx_buff_size> volatile u8 usart_fifo<USART, rx_buff_size, tx_buff_size>::tx_buffer_tail;
+template <typename USART, u8 rx_buff_size, u8 tx_buff_size> volatile u8 usart_fifo<USART, rx_buff_size, tx_buff_size>::tx_head;
+template <typename USART, u8 rx_buff_size, u8 tx_buff_size> volatile u8 usart_fifo<USART, rx_buff_size, tx_buff_size>::tx_tail;
+template <typename USART, u8 rx_buff_size, u8 tx_buff_size> volatile bool usart_fifo<USART, rx_buff_size, tx_buff_size>::tx_full;
 
 template <typename USART, u8 rx_buff_size, u8 tx_buff_size>
 void usart_fifo<USART, rx_buff_size, tx_buff_size>::init()
 {
+		rx_head = 0;
+		rx_tail = 0;
+		rx_full = false;
+		tx_head = 0;
+		tx_tail = 0;
+		tx_full = false;
+}
+
+
+template <typename USART, u8 rx_buff_size, u8 tx_buff_size>
+void usart_fifo<USART, rx_buff_size, tx_buff_size>::inc_rx_head()
+{
+	if(rx_full) rx_tail = (rx_tail + 1) % RX_BUFFER_SIZE;
+	rx_head = (rx_head + 1) % RX_BUFFER_SIZE;
+	rx_full = (rx_head == rx_tail);
 }
 
 template <typename USART, u8 rx_buff_size, u8 tx_buff_size>
-int usart_fifo<USART, rx_buff_size, tx_buff_size>::rx_getchar()
+void usart_fifo<USART, rx_buff_size, tx_buff_size>::inc_rx_tail()
 {
-	u8 rx_head = rx_buffer_head;
-	u8 rx_tail = rx_buffer_tail;
-
-	if(rx_head == rx_tail) return -1;
-
-	rx_tail = (u8)((rx_tail + 1)&(u8)(RX_BUFFER_SIZE - 1));
-
-	rx_buffer_tail = rx_tail;
-
-	return (rx_buffer[rx_tail] & 0x00FF);
+	rx_full = false;
+	rx_tail = (rx_tail + 1) % RX_BUFFER_SIZE;
 }
 
 template <typename USART, u8 rx_buff_size, u8 tx_buff_size>
-int usart_fifo<USART, rx_buff_size, tx_buff_size>::tx_putchar(u8 c)
+bool usart_fifo<USART, rx_buff_size, tx_buff_size>::is_rx_empty()
 {
-	u8 tx_head = (u8)((tx_buffer_head + 1)&(u8)(TX_BUFFER_SIZE-1));
+	return (!rx_full && (rx_head == rx_tail));
+}
 
-	if(tx_head == tx_buffer_tail) return -1;
+template <typename USART, u8 rx_buff_size, u8 tx_buff_size>
+void usart_fifo<USART, rx_buff_size, tx_buff_size>::rx_put(u8 c)
+{
+	rx_buffer[rx_head] = c;
+	inc_rx_head();
+}
 
+template <typename USART, u8 rx_buff_size, u8 tx_buff_size>
+int usart_fifo<USART, rx_buff_size, tx_buff_size>::rx_get()
+{
+	int r = -1;
+	if(!is_rx_empty())
+	{
+		r = rx_buffer[rx_tail] & 0x00FF;
+		inc_rx_tail();
+	}
+	return r;
+}
+
+// --------------------------------------------------------
+
+template <typename USART, u8 rx_buff_size, u8 tx_buff_size>
+void usart_fifo<USART, rx_buff_size, tx_buff_size>::inc_tx_head()
+{
+	if(tx_full) tx_tail = (tx_tail + 1) % TX_BUFFER_SIZE;
+	tx_head = (tx_head + 1) % TX_BUFFER_SIZE;
+	tx_full = (tx_head == tx_tail);
+}
+
+template <typename USART, u8 rx_buff_size, u8 tx_buff_size>
+void usart_fifo<USART, rx_buff_size, tx_buff_size>::inc_tx_tail()
+{
+	tx_full = false;
+	tx_tail = (tx_tail + 1) % TX_BUFFER_SIZE;
+}
+
+template <typename USART, u8 rx_buff_size, u8 tx_buff_size>
+bool usart_fifo<USART, rx_buff_size, tx_buff_size>::is_tx_empty()
+{
+	return (!tx_full && (tx_head == tx_tail));
+}
+
+template <typename USART, u8 rx_buff_size, u8 tx_buff_size>
+void usart_fifo<USART, rx_buff_size, tx_buff_size>::tx_put(u8 c)
+{
 	tx_buffer[tx_head] = c;
-	tx_buffer_head = tx_head;
-	return 0;
+	inc_tx_head();
 }
 
 template <typename USART, u8 rx_buff_size, u8 tx_buff_size>
-int usart_fifo<USART, rx_buff_size, tx_buff_size>::rx_count()
+int usart_fifo<USART, rx_buff_size, tx_buff_size>::tx_get()
 {
-	u8 rx_head = rx_buffer_head;
-	u8 rx_tail = rx_buffer_tail;
-
-	return (rx_head < rx_tail) ? (rx_head + RX_BUFFER_SIZE - rx_tail) : (rx_head - rx_tail);
+	int r = -1;
+	if(!is_tx_empty())
+	{
+		r = tx_buffer[tx_tail] & 0x00FF;
+		inc_tx_tail();
+	}
+	return r;
 }
 
-template <typename USART, u8 rx_buff_size, u8 tx_buff_size>
-int usart_fifo<USART, rx_buff_size, tx_buff_size>::rx_put(u8 c)
-{
-	u8 rx_head = (u8)((rx_buffer_head + 1)&(u8)(RX_BUFFER_SIZE - 1));
-
-	if(rx_head == rx_buffer_tail)
-	{
-		return -1;
-	}
-	else
-	{
-		rx_buffer[rx_head] = c;
-		rx_buffer_head = rx_head;
-	}
-	return 0;
-}
-
-template <typename USART, u8 rx_buff_size, u8 tx_buff_size>
-int usart_fifo<USART, rx_buff_size, tx_buff_size>::tx_char()
-{
-	uint8_t tx_tail = tx_buffer_tail;
-	uint8_t tx_head = tx_buffer_head;
-
-	if(tx_head != tx_tail++)
-	{
-		tx_tail &= TX_BUFFER_SIZE - 1;
-
-		tx_buffer_tail = tx_tail;
-		return (tx_buffer[tx_tail] & 0x00FF);
-	}
-	return -1;
-}
-
+// ---------------------------------------------------------
 #endif /* FIFO_HPP_ */

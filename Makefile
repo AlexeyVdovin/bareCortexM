@@ -1,12 +1,12 @@
 target=bareCortexM
 
-OBJ=src/exception.o src/interrupt.o src/main.o src/startup.o src/system_call.o
+OBJ=src/exception.o src/interrupt.o src/main.o src/rs485.o src/startup.o src/system_call.o 
 
 MCU=stm32f103c8t6
 DEBUG=-O0 -g -ggdb
 INCLUDE=-I libstm32pp/include
 CFLAGS=-mcpu=cortex-m3 -mthumb $(DEBUG) -fsingle-precision-constant $(INCLUDE) -DSTM32F1XX
-CXXFLAGS=$(CFLAGS) -std=c++11 -fabi-version=0
+CXXFLAGS=$(CFLAGS) -std=c++11 -fabi-version=0 -fno-exceptions -fno-rtti
 LDFLAGS=-T linker/$(MCU).ld -Xlinker --gc-sections -Wl,-Map,bareCortexM.map
 
 CC=arm-none-eabi-gcc

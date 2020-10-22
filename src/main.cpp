@@ -37,8 +37,10 @@
 #include "peripheral/i2c.hpp"
 #include "core/stk.hpp"
 
+#include "rs485.hpp"
+
 #define UART1_BAUD_RATE 9600
-#define UART2_BAUD_RATE 9600
+#define UART3_BAUD_RATE 9600
 #define I2C_SLAVE_ADDR  0x30
 
 
@@ -81,11 +83,6 @@ enum {
 
 typedef PA9   U1TX;    // PP
 typedef PA10  U1RX;    // IN
-
-typedef PB10   U2TX;   // PP
-typedef PB11   U2RX;   // IN
-typedef PB14   U2DE;   // PP
-typedef PB15   U2RE;   // PP
 
 typedef PB6   SCL;     // OD
 typedef PB7   SDA;     // OD
@@ -356,8 +353,8 @@ void initializeUsart1()
   U1RX::setMode(gpio::cr::INPUT_PULL_X);
   U1RX::pullUp();
 }
-
-void initializeUsart2()
+#if 0
+void initializeUsart3()
 {
   USART3::enableClock();
   USART3::configure(
@@ -384,13 +381,14 @@ void initializeUsart2()
       usart::cr3::ctse::CTS_HARDWARE_FLOW_DISABLED,
       usart::cr3::ctsie::CTS_INTERRUPT_DISABLED,
       usart::cr3::onebit::ONE_SAMPLE_BIT_METHOD);
-  USART3::setBaudRate<UART2_BAUD_RATE /* bps */ >();
-  U2RE::setMode(gpio::cr::AF_PUSH_PULL_2MHZ);
-  U2DE::setMode(gpio::cr::AF_PUSH_PULL_2MHZ);
-  U2TX::setMode(gpio::cr::AF_PUSH_PULL_2MHZ);
-  U2RX::setMode(gpio::cr::INPUT_PULL_X);
-  U2RX::pullUp();
+  USART3::setBaudRate<UART3_BAUD_RATE /* bps */ >();
+  U3RE::setMode(gpio::cr::AF_PUSH_PULL_2MHZ);
+  U3DE::setMode(gpio::cr::AF_PUSH_PULL_2MHZ);
+  U3TX::setMode(gpio::cr::AF_PUSH_PULL_2MHZ);
+  U3RX::setMode(gpio::cr::INPUT_PULL_X);
+  U3RX::pullUp();
 }
+#endif // 0
 
 void initializeTimer()
 {
@@ -546,12 +544,14 @@ void initializePeripherals()
 {
   initializeGpio();
   initializeUsart1();
-  initializeUsart2();
+  // initializeUsart2();
   initializeConf();
   initializeTimer();
   initializeI2c();
   initializeAdc();
   initializeDma();
+
+  rs485_init();
 
   TIM2::startCounter();
   TIM4::startCounter();
@@ -592,8 +592,11 @@ void loop()
 #endif
 //    if(dma_count != 0) printf("Error: DMA Overlap !!!\n");
 
-    timer_t1 = tick + 500;
+    timer_t1 = tick + 100;
     LED_RED::setOutput(LED_RED::isHigh() ? 0 : 1);
+    //i = rs485_rxcount();
+    //printf("rx: %d\n", i);
+    rs485_write((u8*)"Hello World !!! ", 16);
 #if 0
     ac_main = (s16)((sqrt32(rms/n) * conf.kv_ac.k + 512)/1024 + conf.kv_ac.c);
     ref_avg = ref/n/9;
@@ -620,6 +623,8 @@ int main()
 
   printf("conf1: 0x%08x\n", conf1);
   printf("conf2: 0x%08x\n", conf2);
+
+  rs485_write((u8*)"Hello World !!! ", 16);
 
   while (true) {
     loop();
