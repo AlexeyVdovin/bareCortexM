@@ -132,22 +132,21 @@ int rs485_write(u8* data, u8 count)
 {
   while(count)
   {
-    // TODO: add Timeout
-    if(USART3::canSendDataYet())
+    if(U3FIFO::tx_full)
     {
       U3_TxEnable();
-      USART3::sendData(*data);
-	    USART3::enableTCIE();
-      data++;
-      count--;
-    }
-    else
-    {
-      if(U3FIFO::tx_full) continue;
-      U3FIFO::tx_put(*data);
       USART3::enableTXEI();
-      data++;
-      count--;
+      USART3::enableTCIE();
+      continue;
+    }
+    U3FIFO::tx_put(*data);
+    data++;
+    count--;
+    if(count == 0)
+    {
+      U3_TxEnable();
+      USART3::enableTXEI();
+      USART3::enableTCIE();
     }
   }
   return 0;

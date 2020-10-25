@@ -12,7 +12,6 @@
 
 void rs485_init();
 int  rs485_read();
-int  rs485_rxcount();
 int  rs485_write(u8* data, u8 count);
 
 #endif /* _RS485_HPP_ */

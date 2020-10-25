@@ -39,9 +39,8 @@
 
 #include "rs485.hpp"
 
-#define UART1_BAUD_RATE 9600
-#define UART3_BAUD_RATE 9600
-#define I2C_SLAVE_ADDR  0x30
+#define UART1_BAUD_RATE 115200
+#define I2C_SLAVE_ADDR  0x40
 
 
 #define I2C1_REG reinterpret_cast<i2c::Registers*>(i2c::I2C1)
@@ -71,7 +70,7 @@ typedef PC15 ADR2;     // IN
 typedef PB1  VDD_OK;   // IN
 typedef PB2  VDD_EN;   // PP
 
-typedef PB3  EE_WP;    // PP
+typedef PB3  EE_WP;    // PP Remap !!!
 
 typedef PB9  PWM1;     // PP
 typedef PB8  PWM2;     // PP
@@ -215,7 +214,7 @@ void initializeGpio()
 
   EE_WP::setHigh();
   EE_WP::setMode(gpio::cr::GP_PUSH_PULL_2MHZ);
-
+  AFIO::configureSwj<afio::mapr::swj::JTAG_DP_DISABLED>();
 }
 
 void conf_write(CONF* dst, volatile CONF* src)
@@ -353,42 +352,6 @@ void initializeUsart1()
   U1RX::setMode(gpio::cr::INPUT_PULL_X);
   U1RX::pullUp();
 }
-#if 0
-void initializeUsart3()
-{
-  USART3::enableClock();
-  USART3::configure(
-      usart::cr1::rwu::RECEIVER_IN_ACTIVE_MODE,
-      usart::cr1::re::RECEIVER_ENABLED,
-      usart::cr1::te::TRANSMITTER_ENABLED,
-      usart::cr1::idleie::IDLE_INTERRUPT_DISABLED,
-      usart::cr1::rxneie::RXNE_ORE_INTERRUPT_DISABLED,
-      usart::cr1::tcie::TC_INTERRUPT_DISABLED,
-      usart::cr1::txeie::TXEIE_INTERRUPT_DISABLED,
-      usart::cr1::peie::PEIE_INTERRUPT_DISABLED,
-      usart::cr1::ps::EVEN_PARITY,
-      usart::cr1::pce::PARITY_CONTROL_DISABLED,
-      usart::cr1::wake::WAKE_ON_IDLE_LINE,
-      usart::cr1::m::START_8_DATA_N_STOP,
-      usart::cr1::ue::USART_ENABLED,
-      usart::cr1::over8::OVERSAMPLING_BY_16,
-      usart::cr2::stop::_1_STOP_BIT,
-      usart::cr3::eie::ERROR_INTERRUPT_DISABLED,
-      usart::cr3::hdsel::FULL_DUPLEX,
-      usart::cr3::dmar::RECEIVER_DMA_DISABLED,
-      usart::cr3::dmat::TRANSMITTER_DMA_DISABLED,
-      usart::cr3::rtse::RTS_HARDWARE_FLOW_DISABLED,
-      usart::cr3::ctse::CTS_HARDWARE_FLOW_DISABLED,
-      usart::cr3::ctsie::CTS_INTERRUPT_DISABLED,
-      usart::cr3::onebit::ONE_SAMPLE_BIT_METHOD);
-  USART3::setBaudRate<UART3_BAUD_RATE /* bps */ >();
-  U3RE::setMode(gpio::cr::AF_PUSH_PULL_2MHZ);
-  U3DE::setMode(gpio::cr::AF_PUSH_PULL_2MHZ);
-  U3TX::setMode(gpio::cr::AF_PUSH_PULL_2MHZ);
-  U3RX::setMode(gpio::cr::INPUT_PULL_X);
-  U3RX::pullUp();
-}
-#endif // 0
 
 void initializeTimer()
 {
@@ -442,7 +405,7 @@ void initializeI2c()
   I2C1::setSlave7BitAddr1(I2C_SLAVE_ADDR);
   I2C1::enableACK();
 
-  I2C1::unmaskInterrupts();
+  // I2C1::unmaskInterrupts();
 }
 
 void initializeAdc()
@@ -477,20 +440,20 @@ void initializeAdc()
 
   ADC1::setConversionTime<0, adc::smp::SAMPLING_TIME_55_5_CYCLES>();
   ADC1::setConversionTime<1, adc::smp::SAMPLING_TIME_55_5_CYCLES>();
-  ADC1::setConversionTime<2, adc::smp::SAMPLING_TIME_55_5_CYCLES>();
-  ADC1::setConversionTime<3, adc::smp::SAMPLING_TIME_55_5_CYCLES>();
-  ADC1::setConversionTime<4, adc::smp::SAMPLING_TIME_55_5_CYCLES>();
-  ADC1::setConversionTime<5, adc::smp::SAMPLING_TIME_55_5_CYCLES>();
-  ADC1::setConversionTime<6, adc::smp::SAMPLING_TIME_55_5_CYCLES>();
-  ADC1::setConversionTime<7, adc::smp::SAMPLING_TIME_55_5_CYCLES>();
+  //ADC1::setConversionTime<2, adc::smp::SAMPLING_TIME_55_5_CYCLES>();
+  //ADC1::setConversionTime<3, adc::smp::SAMPLING_TIME_55_5_CYCLES>();
+  //ADC1::setConversionTime<4, adc::smp::SAMPLING_TIME_55_5_CYCLES>();
+  //ADC1::setConversionTime<5, adc::smp::SAMPLING_TIME_55_5_CYCLES>();
+  //ADC1::setConversionTime<6, adc::smp::SAMPLING_TIME_55_5_CYCLES>();
+  //ADC1::setConversionTime<7, adc::smp::SAMPLING_TIME_55_5_CYCLES>();
   ADC1::setConversionTime<8, adc::smp::SAMPLING_TIME_55_5_CYCLES>();
-  ADC1::setConversionTime<9, adc::smp::SAMPLING_TIME_55_5_CYCLES>();
-  ADC1::setConversionTime<10, adc::smp::SAMPLING_TIME_55_5_CYCLES>();
-  ADC1::setConversionTime<11, adc::smp::SAMPLING_TIME_55_5_CYCLES>();
-  ADC1::setConversionTime<12, adc::smp::SAMPLING_TIME_55_5_CYCLES>();
-  ADC1::setConversionTime<13, adc::smp::SAMPLING_TIME_55_5_CYCLES>();
-  ADC1::setConversionTime<14, adc::smp::SAMPLING_TIME_55_5_CYCLES>();
-  ADC1::setConversionTime<15, adc::smp::SAMPLING_TIME_55_5_CYCLES>();
+  //ADC1::setConversionTime<9, adc::smp::SAMPLING_TIME_55_5_CYCLES>();
+  //ADC1::setConversionTime<10, adc::smp::SAMPLING_TIME_55_5_CYCLES>();
+  //ADC1::setConversionTime<11, adc::smp::SAMPLING_TIME_55_5_CYCLES>();
+  //ADC1::setConversionTime<12, adc::smp::SAMPLING_TIME_55_5_CYCLES>();
+  //ADC1::setConversionTime<13, adc::smp::SAMPLING_TIME_55_5_CYCLES>();
+  //ADC1::setConversionTime<14, adc::smp::SAMPLING_TIME_55_5_CYCLES>();
+  //ADC1::setConversionTime<15, adc::smp::SAMPLING_TIME_55_5_CYCLES>();
   ADC1::setConversionTime<16, adc::smp::SAMPLING_TIME_55_5_CYCLES>();
   ADC1::setConversionTime<17, adc::smp::SAMPLING_TIME_55_5_CYCLES>();
 
@@ -544,7 +507,6 @@ void initializePeripherals()
 {
   initializeGpio();
   initializeUsart1();
-  // initializeUsart2();
   initializeConf();
   initializeTimer();
   initializeI2c();
@@ -590,27 +552,20 @@ void loop()
     memcpy(pw, (const void*)rms_pwr, sizeof(pw));
     memset((void*)rms_pwr, 0, sizeof(rms_pwr));
 #endif
-//    if(dma_count != 0) printf("Error: DMA Overlap !!!\n");
-
     timer_t1 = tick + 100;
     LED_RED::setOutput(LED_RED::isHigh() ? 0 : 1);
-    //i = rs485_rxcount();
-    //printf("rx: %d\n", i);
-    rs485_write((u8*)"Hello World !!! ", 16);
 #if 0
-    ac_main = (s16)((sqrt32(rms/n) * conf.kv_ac.k + 512)/1024 + conf.kv_ac.c);
-    ref_avg = ref/n/9;
-
-    for(i = 0; i < 8; ++i)
+    rs485_write((u8*)"Hello World !!!\n", 16);
+    while((i = rs485_read()) >= 0)
     {
-//    	power[i] = (s16)(pw[i]/n * conf.kv_in[i].k/1024 + conf.kv_in[i].c);
-//    	power[i] = (s16)(sqrt32(pw[i]/n * conf.kv_in[i].k/1024 * conf.kv_in[i].k/1024) + conf.kv_in[i].c);
-    	power[i] = (s16)(pw[i]/n * conf.kv_ac.k/4096 * conf.kv_in[i].k/1024 + conf.kv_in[i].c);
-    	energy[i] += power[i]/2; // loop every 500ms
+      putc(i & 0x00FF, stdout);
     }
-
-    printf("AC: %dV, Ch[0]: %.1fW, enrgy: %.3fW/H\n", (int)ac_main, power[0]/10.0, energy[0]/36000.0);
 #endif
+
+    u8 status = I2C1::readSlaveRegister(0x18, 0xE1); // Status
+    printf("status = 0X%02X\n", status);
+
+
   }
 }
 
@@ -625,6 +580,12 @@ int main()
   printf("conf2: 0x%08x\n", conf2);
 
   rs485_write((u8*)"Hello World !!! ", 16);
+
+  VDD_EN::setLow();
+  EN_1W1::setLow();
+  EE_WP::setLow();
+
+  I2C1::writeSlaveRegister(0x18, 0xD2, 0xE1); // Conf register
 
   while (true) {
     loop();
