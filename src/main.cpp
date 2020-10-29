@@ -38,6 +38,7 @@
 #include "core/stk.hpp"
 
 #include "rs485.hpp"
+#include "i2c_master.hpp"
 
 #define UART1_BAUD_RATE 115200
 #define I2C_SLAVE_ADDR  0x40
@@ -535,13 +536,22 @@ u16 sqrt32(u32 n)
   return 0;
 }
 
+typedef struct {
+  u8 addr[8][8];
+  s16 result[8];
+  int err;
+  u8 n;
+} ow_port_t;
+
+ow_port_t ow[4];
+
 void loop()
 {
   static s64 timer_t1 = 1000;
-  s64 rms;
-  s64 pw[8];
-  s32 ref;
-  int i;
+  static u8 ow_n = 5;
+
+  int res;
+  u8 i, n, pad[9];
 
   if(tick >= timer_t1)
   {
@@ -552,7 +562,7 @@ void loop()
     memcpy(pw, (const void*)rms_pwr, sizeof(pw));
     memset((void*)rms_pwr, 0, sizeof(rms_pwr));
 #endif
-    timer_t1 = tick + 100;
+    timer_t1 = tick + 1000;
     LED_RED::setOutput(LED_RED::isHigh() ? 0 : 1);
 #if 0
     rs485_write((u8*)"Hello World !!!\n", 16);
@@ -561,11 +571,80 @@ void loop()
       putc(i & 0x00FF, stdout);
     }
 #endif
+//    u8 status = I2C1::readSlaveRegister(0x18, 0xE1); // Status
+//    printf("status = 0X%02X\n", status);
 
-    u8 status = I2C1::readSlaveRegister(0x18, 0xE1); // Status
-    printf("status = 0X%02X\n", status);
+    if(ow_n < 5)
+    {
+      n = ow_n - 1;
+      if(ow[n].err >= 0)
+      {
+        for(i = 0; i < ow[n].n; ++i)
+        {
+          res = ds2482_ds18b20_read(0x18, ow[n].addr[i], pad);
+          if(res < 0 || ow[n].err == 0)
+          {
+            ow[n].result[i] = -200 + res;
+          }
+          else
+          {
+            ow[n].result[i] = (pad[1] << 8) | pad[0];
+          }
+          printf("%d read %d: %d\n", n, i, ow[n].result[i]);
+        }
+      }
+      if(ow_n > 3) ow_n = 0;
+    }
+    else ow_n = 0;
+    switch(ow_n) {
+    case 0:
+      EN_1W1::setLow();
+      EN_1W2::setHigh();
+      EN_1W3::setHigh();
+      EN_1W4::setHigh();
+      break;
+    case 1:
+      EN_1W1::setHigh();
+      EN_1W2::setLow();
+      EN_1W3::setHigh();
+      EN_1W4::setHigh();
+      break;
+    case 2:
+      EN_1W1::setHigh();
+      EN_1W2::setHigh();
+      EN_1W3::setLow();
+      EN_1W4::setHigh();
+      break;
+    case 3:
+      EN_1W1::setHigh();
+      EN_1W2::setHigh();
+      EN_1W3::setHigh();
+      EN_1W4::setLow();
+      break;
+    default: 
+      EN_1W1::setHigh();
+      EN_1W2::setHigh();
+      EN_1W3::setHigh();
+      EN_1W4::setHigh();
+    }
+    res = ds2482_ds18b20_search(0x18, ow[ow_n].addr);
+    if(res < 0) {
+      ow[ow_n].err = res;
+      ow[ow_n].n = 0;
+    } else {
+      ow[ow_n].err = 0;
+      ow[ow_n].n = res;
+    }
+    printf("%d search [%d]: %d\n", ow_n, ow[ow_n].n, ow[ow_n].err);
 
+    if(ow[ow_n].n)
+    {
+      res = ds2482_ds18b20_start(0x18, 0);
+      ow[ow_n].err = res;
+      printf("%d start: %d\n", ow_n, ow[ow_n].err);
+    }
 
+    ++ow_n;
   }
 }
 
@@ -579,13 +658,12 @@ int main()
   printf("conf1: 0x%08x\n", conf1);
   printf("conf2: 0x%08x\n", conf2);
 
-  rs485_write((u8*)"Hello World !!! ", 16);
+  // rs485_write((u8*)"Hello World !!! ", 16);
 
   VDD_EN::setLow();
-  EN_1W1::setLow();
-  EE_WP::setLow();
+//  EE_WP::setLow();
 
-  I2C1::writeSlaveRegister(0x18, 0xD2, 0xE1); // Conf register
+//  I2C1::writeSlaveRegister(0x18, 0xD2, 0xE1); // Conf register
 
   while (true) {
     loop();
