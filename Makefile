@@ -1,6 +1,6 @@
 target=bareCortexM
 
-OBJ=src/exception.o src/interrupt.o src/main.o src/rs485.o src/i2c_master.o src/startup.o src/system_call.o 
+OBJ=src/exception.o src/interrupt.o src/rs485.o src/rs485_packet.o src/main.o src/i2c_master.o src/startup.o src/system_call.o
 
 MCU=stm32f103c8t6
 DEBUG=-O0 -g -ggdb

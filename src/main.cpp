@@ -21,6 +21,7 @@
 
 #include <stdio.h>
 #include <string.h>
+#include <stddef.h>
 
 #include "clock.hpp"
 
@@ -38,6 +39,7 @@
 #include "core/stk.hpp"
 
 #include "rs485.hpp"
+#include "rs485_packet.hpp"
 #include "i2c_master.hpp"
 
 #define UART1_BAUD_RATE 115200
@@ -108,7 +110,7 @@ typedef struct
 {
   s64 tick;     // 0x00
   u32 status;   // 0x08
-  u16 control;  // 0x0c has ch_id
+  u16 control;  // 0x0c
   s16 adc_12v;  // 0x0e
   s16 adc_in0;  // 0x10
   s16 adc_in1;  // 0x12
@@ -117,11 +119,13 @@ typedef struct
   s16 adc_temp; // 0x1a
   u16 pwm1;     // 0x1c
   u16 pwm2;     // 0x1e
-  u64 sw_id;    // 1W id
-  s16 sw_temp;  // 1W temp in 1/100C
-  u32 nv_cmd;   // 0x20 NV_CMD_****
-  u32 nv_data;  // 0x24
-  u8  count[4]; // 0x28
+  u64 ow_sid;    // 0x20 1W ROM sid
+  u16 ow_type;  // 0x28 type
+  s16 ow_temp;  // 0x2a 1W temp in 1/16C
+  u32 ow_chn;   // 0x2c 1W sensors per channer
+  u32 nv_cmd;   // 0x NV_CMD_****
+  u32 nv_data;  // 0x
+  u8  count[4]; // 0x
 } REGS;
 
 typedef struct
@@ -130,16 +134,52 @@ typedef struct
 	s16 c; // value = k * RAW + c
 } kv_t;
 
+typedef struct 
+{
+  u8  sid[8];
+} ow_t;
+
 typedef struct
 {
+  u32 dummy;
   u16 i2c_id;
   u16 node_id;
   kv_t kv_12v;
   kv_t kv_in[2];
   kv_t kv_ref;
   kv_t kv_temp;
+  ow_t sensor[16];
   u32 crc;
 } CONF;
+
+// 1W sensors
+enum {
+  OW_BOILER_TEMP1   =  0,
+  OW_BOILER_TEMP2, //  1
+  OW_BOILER_IN,    //  2
+  OW_BOILER_OUT,   //  3
+  OW_BOILER_RET,   //  4
+  OW_FLOOR_IN,     //  5
+  OW_FLOOR_OUT,    //  6
+  OW_FLOOR_RET,    //  7
+  OW_RADIATOR_OUT, //  8
+  OW_RADIATOR_RET, //  9
+  OW_HEAT_IN,      // 10
+  OW_HEAT_OUT,     // 11
+  OW_HOTW_IN,      // 12
+  OW_HOTW_OUT,     // 13
+  OW_AMBIENT,      // 14
+  OW_RESERVED      // 15
+}; 
+
+typedef struct {
+  u8 addr[8][8];
+  s16 result[8];
+  int err;
+  u8 n;
+} ow_port_t;
+
+ow_port_t ow[4];
 
 
 enum { NUM_DMA_ADC = 5 };
@@ -161,6 +201,8 @@ volatile CONF conf; // Copy from nv_conf
 CONF* conf1;
 CONF* conf2;
 volatile u16 control;
+
+static inline s64 get_time() { return tick; }
 
 inline void* align_ptr(void* adr, u32 align)
 {
@@ -276,9 +318,9 @@ void initializeConf()
 	  CRC::calc(*(p+i));
   if(conf1->crc == CRC::getCrc())
   {
-	memcpy((void*)&conf, conf1, sizeof(CONF));
-	c1 = true;
-	printf("Conf1 CRC match.\n");
+	  memcpy((void*)&conf, conf1, sizeof(CONF));
+	  c1 = true;
+	  printf("Conf1 CRC match.\n");
   }
 
   p = (u32*)conf2;
@@ -287,9 +329,9 @@ void initializeConf()
 	  CRC::calc(*(p+i));
   if(conf2->crc == CRC::getCrc())
   {
-	if(c1 == false) memcpy((void*)&conf, conf2, sizeof(CONF));
-	c2 = true;
-	printf("Conf2 CRC match.\n");
+	  if(c1 == false) memcpy((void*)&conf, conf2, sizeof(CONF));
+	  c2 = true;
+	  printf("Conf2 CRC match.\n");
   }
 
   if(c1 && (c2 == false || conf2->crc != conf1->crc))
@@ -305,7 +347,7 @@ void initializeConf()
   if(c1 == false && c2 == false)
   {
     printf("Initialize conf with default values.\n");
-    conf.i2c_id = 0x10;
+    conf.i2c_id = I2C_SLAVE_ADDR;
     conf.node_id = 0x3FFF;
     conf.kv_12v.k = 26460;
     conf.kv_12v.c = 0;
@@ -317,6 +359,11 @@ void initializeConf()
     conf.kv_ref.c = 0;
     conf.kv_temp.k = 8192; // TODO: Set correct default Temperature conversion constants
     conf.kv_temp.c = 0;
+    memset((void*)conf.sensor, 0, sizeof(conf.sensor));
+#if 0    
+	  conf_write(conf1, &conf);
+	  conf_write(conf2, &conf);
+#endif
   }
 
 }
@@ -403,7 +450,7 @@ void initializeI2c()
     i2c::cr2::dmaen::DMA_REQUEST_DISABLED,
     i2c::cr2::last::NEXT_DMA_IS_NOT_THE_LAST_TRANSFER);
   I2C1::configureClock<i2c::ccr::f_s::STANDARD_MODE, i2c::ccr::duty::T_LOW_2_T_HIGH_1, 100000 /*Hz*/>();
-  I2C1::setSlave7BitAddr1(I2C_SLAVE_ADDR);
+  I2C1::setSlave7BitAddr1(conf.i2c_id);
   I2C1::enableACK();
 
   // I2C1::unmaskInterrupts();
@@ -441,20 +488,7 @@ void initializeAdc()
 
   ADC1::setConversionTime<0, adc::smp::SAMPLING_TIME_55_5_CYCLES>();
   ADC1::setConversionTime<1, adc::smp::SAMPLING_TIME_55_5_CYCLES>();
-  //ADC1::setConversionTime<2, adc::smp::SAMPLING_TIME_55_5_CYCLES>();
-  //ADC1::setConversionTime<3, adc::smp::SAMPLING_TIME_55_5_CYCLES>();
-  //ADC1::setConversionTime<4, adc::smp::SAMPLING_TIME_55_5_CYCLES>();
-  //ADC1::setConversionTime<5, adc::smp::SAMPLING_TIME_55_5_CYCLES>();
-  //ADC1::setConversionTime<6, adc::smp::SAMPLING_TIME_55_5_CYCLES>();
-  //ADC1::setConversionTime<7, adc::smp::SAMPLING_TIME_55_5_CYCLES>();
   ADC1::setConversionTime<8, adc::smp::SAMPLING_TIME_55_5_CYCLES>();
-  //ADC1::setConversionTime<9, adc::smp::SAMPLING_TIME_55_5_CYCLES>();
-  //ADC1::setConversionTime<10, adc::smp::SAMPLING_TIME_55_5_CYCLES>();
-  //ADC1::setConversionTime<11, adc::smp::SAMPLING_TIME_55_5_CYCLES>();
-  //ADC1::setConversionTime<12, adc::smp::SAMPLING_TIME_55_5_CYCLES>();
-  //ADC1::setConversionTime<13, adc::smp::SAMPLING_TIME_55_5_CYCLES>();
-  //ADC1::setConversionTime<14, adc::smp::SAMPLING_TIME_55_5_CYCLES>();
-  //ADC1::setConversionTime<15, adc::smp::SAMPLING_TIME_55_5_CYCLES>();
   ADC1::setConversionTime<16, adc::smp::SAMPLING_TIME_55_5_CYCLES>();
   ADC1::setConversionTime<17, adc::smp::SAMPLING_TIME_55_5_CYCLES>();
 
@@ -536,44 +570,27 @@ u16 sqrt32(u32 n)
   return 0;
 }
 
-typedef struct {
-  u8 addr[8][8];
-  s16 result[8];
-  int err;
-  u8 n;
-} ow_port_t;
-
-ow_port_t ow[4];
-
 void loop()
 {
   static s64 timer_t1 = 1000;
   static u8 ow_n = 5;
 
-  int res;
-  u8 i, n, pad[9];
+  int i, res;
+  u8 n, pad[9];
 
   if(tick >= timer_t1)
   {
-#if 0
-	u16 n = (u16)dma_count; dma_count = 0;
-    rms = rms_main; rms_main = 0;
-    ref = ref_sum; ref_sum = 0;
-    memcpy(pw, (const void*)rms_pwr, sizeof(pw));
-    memset((void*)rms_pwr, 0, sizeof(rms_pwr));
-#endif
     timer_t1 = tick + 1000;
-    LED_RED::setOutput(LED_RED::isHigh() ? 0 : 1);
+    // LED_RED::setOutput(LED_RED::isHigh() ? 0 : 1);
 #if 0
-    rs485_write((u8*)"Hello World !!!\n", 16);
+    // rs485_write((u8*)"Hello World !!!\n", 16);
     while((i = rs485_read()) >= 0)
     {
       putc(i & 0x00FF, stdout);
     }
+    putc('\n', stdout);
 #endif
-//    u8 status = I2C1::readSlaveRegister(0x18, 0xE1); // Status
-//    printf("status = 0X%02X\n", status);
-
+#if 1
     if(ow_n < 5)
     {
       n = ow_n - 1;
@@ -635,17 +652,19 @@ void loop()
       ow[ow_n].err = 0;
       ow[ow_n].n = res;
     }
-    printf("%d search [%d]: %d\n", ow_n, ow[ow_n].n, ow[ow_n].err);
+    //printf("%d search [%d]: %d\n", ow_n, ow[ow_n].n, ow[ow_n].err);
 
     if(ow[ow_n].n)
     {
       res = ds2482_ds18b20_start(0x18, 0);
       ow[ow_n].err = res;
-      printf("%d start: %d\n", ow_n, ow[ow_n].err);
+      //printf("%d start: %d\n", ow_n, ow[ow_n].err);
     }
 
     ++ow_n;
+#endif    
   }
+  pkt_pool();
 }
 
 int main()
@@ -655,15 +674,16 @@ int main()
   memset((void*)&regs, 0, sizeof(regs));
   initializePeripherals();
 
-  printf("conf1: 0x%08x\n", conf1);
-  printf("conf2: 0x%08x\n", conf2);
+//  printf("conf1: 0x%08x\n", conf1);
+//  printf("conf2: 0x%08x\n", conf2);
+
+  pkt_init();
 
   // rs485_write((u8*)"Hello World !!! ", 16);
 
   VDD_EN::setLow();
 //  EE_WP::setLow();
 
-//  I2C1::writeSlaveRegister(0x18, 0xD2, 0xE1); // Conf register
 
   while (true) {
     loop();
@@ -675,6 +695,96 @@ int main()
     	printf("Reset I2C!\n");
     }
   }
+}
+
+int pkt_rw_reg(packet_t* pkt)
+{
+  u16 addr = (pkt->data[3]) << 8 | pkt->data[2];
+  u8* p = (u8*)&regs;
+  if(addr+pkt->data[1] > sizeof(regs) || pkt->data[1] > 16) return 0;
+  if(addr == offsetof(REGS, tick)) regs.tick = tick;
+  if(pkt->data[0] == PKT_CMD_READ_REG)
+  {
+    memcpy(pkt->data+4, p+addr, pkt->data[1]);
+    pkt->len = 4 + pkt->data[1];
+  }
+  else
+  {
+    memcpy(p+addr, pkt->data+4, pkt->data[1]);
+  }
+  return 1;
+}
+
+int pkt_rw_conf(packet_t* pkt)
+{
+  u16 addr = (pkt->data[3]) << 8 | pkt->data[2];
+  u8* p = (u8*)&conf;
+  if(addr+pkt->data[1] > sizeof(conf) || pkt->data[1] > 16) return 0;
+  if(pkt->data[0] == PKT_CMD_READ_CONF)
+  {
+    memcpy(&pkt->data[4], p+addr, pkt->data[1]);
+    pkt->len = 4 + pkt->data[1];
+  }
+  else
+  {
+    memcpy(p+addr, &pkt->data[4], pkt->data[1]);
+  }
+  return 1;
+}
+/*
+  u8 addr[8][8];
+  s16 result[8];
+  int err;
+  u8 n;
+*/
+int pkt_read_1w(packet_t* pkt)
+{
+  u8 ch = pkt->data[3];
+  u8 i = pkt->data[2];
+  if(ch > 4 || i > 8) return 0;
+  pkt->data[4] = ow[ch].n;
+  memcpy(&pkt->data[5], &ow[ch].addr[i], 8);
+  memcpy(&pkt->data[13], &ow[ch].result[i], sizeof(s16));
+  pkt->data[1] = 11;
+  pkt->len = 15;
+  return 1;
+}
+
+void pkt_process(packet_t* pkt)
+{
+  int tx = 0;
+
+  // printf("pkt: 0x%02x%02x %02x->%02x->%02x %02x %02x [%02x] %02x %02x %02x %02x\n", pkt->id[0], pkt->id[1], pkt->from, pkt->via, pkt->to, pkt->flags, pkt->seq, pkt->len, pkt->data[0], pkt->data[1], pkt->data[2], pkt->data[3]);
+  if(pkt->from == conf.i2c_id) return;
+
+  switch(pkt->data[0])
+  {
+    case PKT_CMD_READ_REG:
+    case PKT_CMD_WRITE_REG:
+      tx = pkt_rw_reg(pkt);
+      break;
+    case PKT_CMD_READ_CONF:
+    case PKT_CMD_WRITE_CONF:
+      tx = pkt_rw_conf(pkt);
+      break;
+    case PKT_CMD_READ_1W:
+      tx = pkt_read_1w(pkt);
+      break;
+    default:
+      pkt->len = 1;
+      pkt->data[0] = PKT_CMD_NAK;
+      tx = 1;
+      break;
+  }
+  if(tx)
+  {
+    LED_RED::setOutput(LED_RED::isHigh() ? 0 : 1);
+    pkt->to = pkt->from;
+    pkt->from = conf.i2c_id;
+    pkt->via = 0;
+    // printf("TX: 0x%02x%02x %02x->%02x->%02x %02x %02x [%02x] %02x %02x %02x %02x %02x %02x %02x %02x\n", pkt->id[0], pkt->id[1], pkt->from, pkt->via, pkt->to, pkt->flags, pkt->seq, pkt->len, pkt->data[0], pkt->data[1], pkt->data[2], pkt->data[3], pkt->data[4], pkt->data[5], pkt->data[6], pkt->data[7]);
+    pkt_send(pkt);
+  } 
 }
 
 /*
