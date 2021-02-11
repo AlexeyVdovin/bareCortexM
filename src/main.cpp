@@ -108,24 +108,28 @@ enum {
 
 typedef struct
 {
-  s64 tick;     // 0x00
-  u32 status;   // 0x08
-  u16 control;  // 0x0c
-  s16 adc_12v;  // 0x0e
-  s16 adc_in0;  // 0x10
-  s16 adc_in1;  // 0x12
-  s32 reserved; // 0x14
-  s16 adc_ref;  // 0x18
-  s16 adc_temp; // 0x1a
-  u16 pwm1;     // 0x1c
-  u16 pwm2;     // 0x1e
-  u64 ow_sid;    // 0x20 1W ROM sid
-  u16 ow_type;  // 0x28 type
-  s16 ow_temp;  // 0x2a 1W temp in 1/16C
-  u32 ow_chn;   // 0x2c 1W sensors per channer
-  u32 nv_cmd;   // 0x NV_CMD_****
-  u32 nv_data;  // 0x
-  u8  count[4]; // 0x
+  s64 tick;      // 0x00 RO
+  u32 status;    // 0x08 RO
+  u16 control;   // 0x0c R/W
+  s16 adc_12v;   // 0x0e RO
+  s16 adc_in0;   // 0x10 RO
+  s16 adc_in1;   // 0x12 RO
+  s32 reserved;  // 0x14 --
+  s16 adc_ref;   // 0x18 RO
+  s16 adc_temp;  // 0x1a RO
+  u16 pwm1;      // 0x1c RO
+  u16 pwm2;      // 0x1e RO
+  u8  ow_sid[8]; // 0x20 1W ROM sid
+  u16 ow_type;   // 0x28 type
+  s16 ow_temp;   // 0x2a 1W temp in 1/16C
+  u8  ow_ch[4];  // 0x2c 1W sensors per channer
+  u8  pwm1_tid;  // 0x30 1W sensor id for PWM1
+  u8  pwm2_tid;  // 0x31 1W sensor id for PWM2
+  s16 pwm1_set;  // 0x32 temp Set for PWM1
+  s16 pwm2_set;  // 0x34 temp Set for PWM1
+  u32 nv_cmd;    // 0x NV_CMD_****
+  u32 nv_data;   // 0x
+  u8  count[4];  // 0x
 } REGS;
 
 typedef struct
@@ -139,17 +143,24 @@ typedef struct
   u8  sid[8];
 } ow_t;
 
-typedef struct
+typedef union 
 {
   u32 dummy;
-  u16 i2c_id;
-  u16 node_id;
-  kv_t kv_12v;
-  kv_t kv_in[2];
-  kv_t kv_ref;
-  kv_t kv_temp;
-  ow_t sensor[16];
-  u32 crc;
+  struct
+  {
+    u16 i2c_id;
+    u16 node_id;
+    kv_t kv_12v;
+    kv_t kv_in[2];
+    kv_t kv_ref;
+    kv_t kv_temp;
+    ow_t sensor[16];
+    u16  pwm_min;
+    u16  pwm_max;
+    u8   pwm1_tid; // 1W Device type for PWM1
+    u8   pwm2_tid; // 1W Device type for PWM2
+    u32 crc;    // Aligned ? !!!
+  };
 } CONF;
 
 // 1W sensors
@@ -173,14 +184,22 @@ enum {
 }; 
 
 typedef struct {
-  u8 addr[8][8];
-  s16 result[8];
   int err;
-  u8 n;
+  u8 addr[8]; // 1W HW addr
+  s16 result; // Measured result
+  u8 ch;      // Ch ID
+  u8 type;    // 1W Device type
+} ow_dev_t;
+
+typedef struct {
+  u8 dev[8]; // index in ow_dev
+  int err;
+  u8 n;      // devices on this channel
 } ow_port_t;
 
+u8 ow_dev_total = 0; // total 1W devices
+ow_dev_t ow_dev[32];
 ow_port_t ow[4];
-
 
 enum { NUM_DMA_ADC = 5 };
 
@@ -359,6 +378,8 @@ void initializeConf()
     conf.kv_ref.c = 0;
     conf.kv_temp.k = 8192; // TODO: Set correct default Temperature conversion constants
     conf.kv_temp.c = 0;
+    conf.pwm_min = 0;
+    conf.pwm_max = 999;
     memset((void*)conf.sensor, 0, sizeof(conf.sensor));
 #if 0    
 	  conf_write(conf1, &conf);
@@ -409,7 +430,7 @@ void initializeTimer()
 
   // PWM timer
   TIM4::enableClock();
-  TIM4::configurePwm<12000000, 100>();
+  TIM4::configurePwm<24000000, 1000>();
 
   TIM4::configurePwmOutput<PWM1_OC>(
       tim::ccer::cce::ENABLED,
@@ -420,8 +441,8 @@ void initializeTimer()
       tim::ccer::ccp::RISING_EDGE_ACTIVE_HIGH,
       tim::occmr::ocm::PWM_MODE_1);
 
-  TIM4::setPulse<PWM1_OC>(20);
-  TIM4::setPulse<PWM2_OC>(50);
+  TIM4::setPulse<PWM1_OC>(0);
+  TIM4::setPulse<PWM2_OC>(0);
 
   PWM1::setLow();
   PWM1::setMode(gpio::cr::AF_PUSH_PULL_50MHZ);
@@ -570,6 +591,39 @@ u16 sqrt32(u32 n)
   return 0;
 }
 
+s16 get_temp(u8 id)
+{
+
+  return 0;
+}
+
+typedef struct {
+  s16 p;   // Proportional gain
+  s16 i;   // Integral gain
+  s16 d;   // Derivative
+  s16 t;   // previouse Temp
+  s32 val; // control Value
+  s32 integral;
+} pd_t;
+
+pd_t p1, p2;
+
+/* p - pid*, t0 - target T, t - current T */
+void update_pid(pd_t* p, s16 set, s16 t)
+{
+  s16 error = set - t;
+  s16 delta = p->t - t;
+  s32 out = p->p * error / 4096;
+  out += p->d * delta / 4096;
+  p->integral += p->i * error / 4096;
+  p->t = t;
+  out += p->integral;
+  p->val = out;
+}
+
+static inline u16 min(s16 a, u16 b) { return (a < b) ? a : b; }
+static inline u16 max(u16 a, s16 b) { return (a < b) ? b : a; }
+
 void loop()
 {
   static s64 timer_t1 = 1000;
@@ -581,6 +635,8 @@ void loop()
   if(tick >= timer_t1)
   {
     timer_t1 = tick + 1000;
+    TIM4::setPulse<PWM1_OC>(regs.pwm1);
+    TIM4::setPulse<PWM2_OC>(regs.pwm2);
     // LED_RED::setOutput(LED_RED::isHigh() ? 0 : 1);
 #if 0
     // rs485_write((u8*)"Hello World !!!\n", 16);
@@ -605,7 +661,31 @@ void loop()
           }
           else
           {
-            ow[n].result[i] = (pad[1] << 8) | pad[0];
+            s16 pwm = regs.pwm1;
+            s16 temp = (pad[1] << 8) | pad[0];
+            ow[n].result[i] = temp;
+            if(memcmp((const void*)conf.sensor[regs.pwm1_tid].sid, ow[n].addr[i], 8) == 0)
+            {
+              if(p1.t < -999) p1.t = temp; // Set initial value
+              update_pid(&p1, regs.pwm1_set, temp);
+              pwm += p1.val;
+              regs.pwm1 = max(conf.pwm_min, min(pwm, conf.pwm_max));
+              printf("T1: %d.%02d Set1: %d.%02d PWM1: %d\n", 
+                  temp/16, (temp - (temp/16)*16)*100/16, 
+                  regs.pwm1_set/16, (regs.pwm1_set - (regs.pwm1_set/16)*16)*100/16, 
+                  regs.pwm1);
+            }
+            if(memcmp((const void*)conf.sensor[regs.pwm2_tid].sid, ow[n].addr[i], 8) == 0)
+            {
+              if(p2.t < -999) p2.t = temp;  // Set initial value
+              update_pid(&p2, regs.pwm2_set, temp);
+              pwm += p2.val;
+              regs.pwm2 = max(conf.pwm_min, min(pwm, conf.pwm_max));
+              printf("T2: %d.%02d Set2: %d.%02d PWM2: %d\n", 
+                  temp/16, (temp - (temp/16)*16)*100/16, 
+                  regs.pwm2_set/16, ((regs.pwm2_set - (regs.pwm2_set/16)*16)*100)/16, 
+                  regs.pwm2);
+            }
           }
           printf("%d read %d: %d\n", n, i, ow[n].result[i]);
         }
@@ -671,7 +751,14 @@ int main()
 {
   clk::initialize();
 
+  p1.t = -1000;
+  p2.t = -1000;
+
   memset((void*)&regs, 0, sizeof(regs));
+  regs.pwm1_tid = OW_FLOOR_OUT;
+  regs.pwm1_set = 28 << 4;  // 28C
+  
+
   initializePeripherals();
 
 //  printf("conf1: 0x%08x\n", conf1);
