@@ -123,10 +123,10 @@ typedef struct
   u16 ow_type;   // 0x28 type
   s16 ow_temp;   // 0x2a 1W temp in 1/16C
   u8  ow_ch[4];  // 0x2c 1W sensors per channer
-  u8  pwm1_tid;  // 0x30 1W sensor id for PWM1
-  u8  pwm2_tid;  // 0x31 1W sensor id for PWM2
-  s16 pwm1_set;  // 0x32 temp Set for PWM1
-  s16 pwm2_set;  // 0x34 temp Set for PWM1
+  u8  pwm1_cid[2];  // 0x30 1W sensor ch+id for PWM1
+  u8  pwm2_cid[2];  // 0x32 1W sensor ch+id for PWM2
+  s16 pwm1_set;  // 0x34 temp Set for PWM1
+  s16 pwm2_set;  // 0x36 temp Set for PWM1
   u32 nv_cmd;    // 0x NV_CMD_****
   u32 nv_data;   // 0x
   u8  count[4];  // 0x
@@ -134,13 +134,13 @@ typedef struct
 
 typedef struct
 {
-	s16	k; // k in 1/8192
-	s16 c; // value = k * RAW + c
+	int16_t	k; // k in 1/8192
+	int16_t c; // value = k * RAW + c
 } kv_t;
 
 typedef struct 
 {
-  u8  sid[8];
+  uint8_t  sid[8];
 } ow_t;
 
 typedef union 
@@ -148,18 +148,18 @@ typedef union
   u32 dummy;
   struct
   {
-    u16 i2c_id;
-    u16 node_id;
+    uint16_t i2c_id;
+    uint16_t node_id;
     kv_t kv_12v;
     kv_t kv_in[2];
     kv_t kv_ref;
     kv_t kv_temp;
     ow_t sensor[16];
-    u16  pwm_min;
-    u16  pwm_max;
-    u8   pwm1_tid; // 1W Device type for PWM1
-    u8   pwm2_tid; // 1W Device type for PWM2
-    u32 crc;    // Aligned ? !!!
+    uint16_t  pwm_min;
+    uint16_t  pwm_max;
+    uint8_t   pwm1_tid[2]; // 1W Device type for PWM1
+    uint8_t   pwm2_tid[2]; // 1W Device type for PWM2
+    uint32_t crc;    // Aligned ? !!!
   };
 } CONF;
 
@@ -368,11 +368,11 @@ void initializeConf()
     printf("Initialize conf with default values.\n");
     conf.i2c_id = I2C_SLAVE_ADDR;
     conf.node_id = 0x3FFF;
-    conf.kv_12v.k = 26460;
+    conf.kv_12v.k = 4054;
     conf.kv_12v.c = 0;
-    conf.kv_in[0].k = 147;
+    conf.kv_in[0].k = 4054;
     conf.kv_in[0].c = 0;
-    conf.kv_in[1].k = 256;
+    conf.kv_in[1].k = 4054;
     conf.kv_in[1].c = 0;
     conf.kv_ref.k = 8192;
     conf.kv_ref.c = 0;
@@ -380,7 +380,13 @@ void initializeConf()
     conf.kv_temp.c = 0;
     conf.pwm_min = 0;
     conf.pwm_max = 999;
+    conf.pwm1_tid[0] = OW_FLOOR_OUT;
+    conf.pwm1_tid[1] = OW_FLOOR_RET;
     memset((void*)conf.sensor, 0, sizeof(conf.sensor));
+    const uint8_t tmp1[] = { 0x28, 0xD0, 0x01, 0x94, 0x97, 0x08, 0x03, 0x3E};
+    const uint8_t tmp2[] = { 0x28, 0xD6, 0x3D, 0x94, 0x97, 0x08, 0x03, 0x29};
+    memcpy((void*)conf.sensor[OW_FLOOR_OUT].sid, tmp1, sizeof(tmp1));
+    memcpy((void*)conf.sensor[OW_FLOOR_RET].sid, tmp2, sizeof(tmp2));
 #if 0    
 	  conf_write(conf1, &conf);
 	  conf_write(conf2, &conf);
@@ -430,7 +436,7 @@ void initializeTimer()
 
   // PWM timer
   TIM4::enableClock();
-  TIM4::configurePwm<24000000, 1000>();
+  TIM4::configurePwm<2400000, 1000>();
 
   TIM4::configurePwmOutput<PWM1_OC>(
       tim::ccer::cce::ENABLED,
@@ -591,12 +597,6 @@ u16 sqrt32(u32 n)
   return 0;
 }
 
-s16 get_temp(u8 id)
-{
-
-  return 0;
-}
-
 typedef struct {
   s16 p;   // Proportional gain
   s16 i;   // Integral gain
@@ -613,9 +613,9 @@ void update_pid(pd_t* p, s16 set, s16 t)
 {
   s16 error = set - t;
   s16 delta = p->t - t;
-  s32 out = p->p * error / 4096;
-  out += p->d * delta / 4096;
-  p->integral += p->i * error / 4096;
+  s32 out = p->p * error / 1024;
+  out += p->d * delta / 1024;
+  p->integral += p->i * error / 1024;
   p->t = t;
   out += p->integral;
   p->val = out;
@@ -624,19 +624,78 @@ void update_pid(pd_t* p, s16 set, s16 t)
 static inline u16 min(s16 a, u16 b) { return (a < b) ? a : b; }
 static inline u16 max(u16 a, s16 b) { return (a < b) ? b : a; }
 
+void update_pwm1()
+{
+  s16 temp, res1, res2;
+  s16 pwm = regs.pwm1;
+  uint8_t ch, i;
+
+  ch = (regs.pwm1_cid[0]&0x70) >> 4;
+  i = regs.pwm1_cid[0]&0x07;
+  // Sensor not present or error
+  if(ch == 0 || ow_dev[ow[ch-1].dev[i]].err) return;
+  res1 = ow_dev[ow[ch-1].dev[i]].result;
+
+  ch = (regs.pwm1_cid[1]&0x70) >> 4;
+  i = regs.pwm1_cid[1]&0x07;
+  // Sensor not present or error
+  if(ch == 0 || ow_dev[ow[ch-1].dev[i]].err) return;
+  res2 = ow_dev[ow[ch-1].dev[i]].result;
+
+  // Average temperature
+  temp = (res1 + res2)/2;
+
+  if(p1.t < -999) p1.t = temp; // Set initial value
+  update_pid(&p1, regs.pwm1_set, temp);
+  pwm += p1.val;
+  regs.pwm1 = max(conf.pwm_min, min(pwm, conf.pwm_max));
+  printf("T1: %d.%02d Set1: %d.%02d PWM1: %d\n", 
+      temp/16, (temp - (temp/16)*16)*100/16, 
+      regs.pwm1_set/16, (regs.pwm1_set - (regs.pwm1_set/16)*16)*100/16, 
+      regs.pwm1);
+  TIM4::setPulse<PWM1_OC>(regs.pwm1);
+}
+
+void update_pwm2()
+{
+  s16 temp, res1, res2;
+  s16 pwm = regs.pwm2;
+  uint8_t ch, i;
+
+  ch = (regs.pwm2_cid[0]&0x70) >> 4;
+  i = regs.pwm2_cid[0]&0x07;
+  if(ch == 0 || ow_dev[ow[ch-1].dev[i]].err) return;
+  res1 = ow_dev[ow[ch-1].dev[i]].result;
+
+  ch = (regs.pwm2_cid[1]&0x70) >> 4;
+  i = regs.pwm2_cid[1]&0x07;
+  if(ch == 0 || ow_dev[ow[ch-1].dev[i]].err) return;
+  res2 = ow_dev[ow[ch-1].dev[i]].result;
+
+  temp = (res1 + res2)/2;
+
+  if(p2.t < -999) p2.t = temp; // Set initial value
+  update_pid(&p2, regs.pwm2_set, temp);
+  pwm += p2.val;
+  regs.pwm2 = max(conf.pwm_min, min(pwm, conf.pwm_max));
+  printf("T2: %d.%02d Set1: %d.%02d PWM1: %d\n", 
+      temp/16, (temp - (temp/16)*16)*100/16, 
+      regs.pwm2_set/16, (regs.pwm2_set - (regs.pwm2_set/16)*16)*100/16, 
+      regs.pwm2);
+  TIM4::setPulse<PWM2_OC>(regs.pwm2);
+}
+
 void loop()
 {
   static s64 timer_t1 = 1000;
-  static u8 ow_n = 5;
+  static u8 ow_ch = 5, ow_n = 0;
 
   int i, res;
-  u8 n, pad[9];
+  u8 ch, pad[9];
 
   if(tick >= timer_t1)
   {
     timer_t1 = tick + 1000;
-    TIM4::setPulse<PWM1_OC>(regs.pwm1);
-    TIM4::setPulse<PWM2_OC>(regs.pwm2);
     // LED_RED::setOutput(LED_RED::isHigh() ? 0 : 1);
 #if 0
     // rs485_write((u8*)"Hello World !!!\n", 16);
@@ -647,53 +706,56 @@ void loop()
     putc('\n', stdout);
 #endif
 #if 1
-    if(ow_n < 5)
+    if(ow_ch < 5)
     {
-      n = ow_n - 1;
-      if(ow[n].err >= 0)
+      ch = ow_ch - 1;
+      if(ow[ch].err >= 0)
       {
-        for(i = 0; i < ow[n].n; ++i)
+        for(i = 0; i < ow[ch].n; ++i)
         {
-          res = ds2482_ds18b20_read(0x18, ow[n].addr[i], pad);
-          if(res < 0 || ow[n].err == 0)
+          res = ds2482_ds18b20_read(0x18, ow_dev[ow[ch].dev[i]].addr, pad);
+          if(res < 0 || ow[ch].err == 0)
           {
-            ow[n].result[i] = -200 + res;
+            ow_dev[ow[ch].dev[i]].result = -200 + res;
           }
           else
           {
-            s16 pwm = regs.pwm1;
+            uint8_t sens = ow[ch].dev[i];
             s16 temp = (pad[1] << 8) | pad[0];
-            ow[n].result[i] = temp;
-            if(memcmp((const void*)conf.sensor[regs.pwm1_tid].sid, ow[n].addr[i], 8) == 0)
-            {
-              if(p1.t < -999) p1.t = temp; // Set initial value
-              update_pid(&p1, regs.pwm1_set, temp);
-              pwm += p1.val;
-              regs.pwm1 = max(conf.pwm_min, min(pwm, conf.pwm_max));
-              printf("T1: %d.%02d Set1: %d.%02d PWM1: %d\n", 
-                  temp/16, (temp - (temp/16)*16)*100/16, 
-                  regs.pwm1_set/16, (regs.pwm1_set - (regs.pwm1_set/16)*16)*100/16, 
-                  regs.pwm1);
-            }
-            if(memcmp((const void*)conf.sensor[regs.pwm2_tid].sid, ow[n].addr[i], 8) == 0)
-            {
-              if(p2.t < -999) p2.t = temp;  // Set initial value
-              update_pid(&p2, regs.pwm2_set, temp);
-              pwm += p2.val;
-              regs.pwm2 = max(conf.pwm_min, min(pwm, conf.pwm_max));
-              printf("T2: %d.%02d Set2: %d.%02d PWM2: %d\n", 
-                  temp/16, (temp - (temp/16)*16)*100/16, 
-                  regs.pwm2_set/16, ((regs.pwm2_set - (regs.pwm2_set/16)*16)*100)/16, 
-                  regs.pwm2);
-            }
+            ow_dev[ow[ch].dev[i]].result = temp;
+
+            if(memcmp((const void*)conf.sensor[conf.pwm1_tid[0]].sid, ow_dev[ow[ch].dev[i]].addr, 8) == 0) regs.pwm1_cid[0] = ((ch+1) << 4) | (i & 0x07);
+            if(memcmp((const void*)conf.sensor[conf.pwm1_tid[1]].sid, ow_dev[ow[ch].dev[i]].addr, 8) == 0) regs.pwm1_cid[1] = ((ch+1) << 4) | (i & 0x07);
+            if(memcmp((const void*)conf.sensor[conf.pwm2_tid[0]].sid, ow_dev[ow[ch].dev[i]].addr, 8) == 0) regs.pwm2_cid[0] = ((ch+1) << 4) | (i & 0x07);
+            if(memcmp((const void*)conf.sensor[conf.pwm2_tid[1]].sid, ow_dev[ow[ch].dev[i]].addr, 8) == 0) regs.pwm2_cid[1] = ((ch+1) << 4) | (i & 0x07);
+
+            printf("ch%d: %02X%02X%02X%02X%02X%02X%02X%02X  read %d: %d.%02d\n", ch+1, 
+            ow_dev[ow[ch].dev[i]].addr[0], 
+            ow_dev[ow[ch].dev[i]].addr[1], 
+            ow_dev[ow[ch].dev[i]].addr[2], 
+            ow_dev[ow[ch].dev[i]].addr[3], 
+            ow_dev[ow[ch].dev[i]].addr[4], 
+            ow_dev[ow[ch].dev[i]].addr[5], 
+            ow_dev[ow[ch].dev[i]].addr[6], 
+            ow_dev[ow[ch].dev[i]].addr[7], 
+            i, temp/16, (temp - (temp/16)*16)*100/16);
           }
-          printf("%d read %d: %d\n", n, i, ow[n].result[i]);
         }
       }
-      if(ow_n > 3) ow_n = 0;
+      if(ow_ch > 3)
+      {
+        update_pwm1();
+        update_pwm2();
+        ow_ch = 0;
+        ow_n = 0;
+
+        printf("in1: %d mV\n", regs.adc_in0);
+        printf("in2: %d mV\n", regs.adc_in1);
+        printf("12v: %d mV\n", regs.adc_12v);
+      } 
     }
-    else ow_n = 0;
-    switch(ow_n) {
+    else ow_ch = 0, ow_n = 0;
+    switch(ow_ch) {
     case 0:
       EN_1W1::setLow();
       EN_1W2::setHigh();
@@ -724,24 +786,40 @@ void loop()
       EN_1W3::setHigh();
       EN_1W4::setHigh();
     }
-    res = ds2482_ds18b20_search(0x18, ow[ow_n].addr);
-    if(res < 0) {
-      ow[ow_n].err = res;
-      ow[ow_n].n = 0;
-    } else {
-      ow[ow_n].err = 0;
-      ow[ow_n].n = res;
+    {
+      uint8_t addr[8][8];
+      res = ds2482_ds18b20_search(0x18, addr);
+      if(res < 0) {
+        ow[ow_ch].err = res;
+        ow[ow_ch].n = 0;
+      } else {
+        for(i=0; i<res; ++i)
+        {
+          memcpy(ow_dev[ow_n].addr, addr[i], 8);
+          ow[ow_ch].dev[i] = ow_n++;
+          if((regs.pwm1_cid[0] == ((ow_ch+1) << 4) | (i & 0x07)) &&
+              memcmp((const void*)conf.sensor[conf.pwm1_tid[0]].sid, addr[i], 8) != 0) regs.pwm1_cid[0] = 0; // lost
+          if((regs.pwm1_cid[1] == ((ow_ch+1) << 4) | (i & 0x07)) &&
+              memcmp((const void*)conf.sensor[conf.pwm1_tid[1]].sid, addr[i], 8) != 0) regs.pwm1_cid[1] = 0; // lost
+          if((regs.pwm2_cid[0] == ((ow_ch+1) << 4) | (i & 0x07)) &&
+              memcmp((const void*)conf.sensor[conf.pwm2_tid[0]].sid, addr[i], 8) != 0) regs.pwm2_cid[0] = 0; // lost
+          if((regs.pwm2_cid[1] == ((ow_ch+1) << 4) | (i & 0x07)) &&
+              memcmp((const void*)conf.sensor[conf.pwm2_tid[1]].sid, addr[i], 8) != 0) regs.pwm2_cid[1] = 0; // lost
+        }
+        ow[ow_ch].err = 0;
+        ow[ow_ch].n = res;
+      }
+      //printf("%d search [%d]: %d\n", ow_ch, ow[ow_ch].n, ow[ow_ch].err);
     }
-    //printf("%d search [%d]: %d\n", ow_n, ow[ow_n].n, ow[ow_n].err);
 
-    if(ow[ow_n].n)
+    if(ow[ow_ch].n)
     {
       res = ds2482_ds18b20_start(0x18, 0);
-      ow[ow_n].err = res;
-      //printf("%d start: %d\n", ow_n, ow[ow_n].err);
+      ow[ow_ch].err = res;
+      //printf("%d start: %d\n", ow_ch, ow[ow_ch].err);
     }
 
-    ++ow_n;
+    ++ow_ch;
 #endif    
   }
   pkt_pool();
@@ -752,11 +830,17 @@ int main()
   clk::initialize();
 
   p1.t = -1000;
+  p1.p = 2 * 1024;
+  p1.d = 10 * 1024;
+  p1.i = 0;
+
   p2.t = -1000;
+  p2.p = 2 * 1024;
+  p2.d = 10 * 1024;
+  p2.i = 0;
 
   memset((void*)&regs, 0, sizeof(regs));
-  regs.pwm1_tid = OW_FLOOR_OUT;
-  regs.pwm1_set = 28 << 4;  // 28C
+  regs.pwm1_set = 28 << 4;  // 28C <------ Read from EE
   
 
   initializePeripherals();
@@ -830,8 +914,8 @@ int pkt_read_1w(packet_t* pkt)
   u8 i = pkt->data[2];
   if(ch > 4 || i > 8) return 0;
   pkt->data[4] = ow[ch].n;
-  memcpy(&pkt->data[5], &ow[ch].addr[i], 8);
-  memcpy(&pkt->data[13], &ow[ch].result[i], sizeof(s16));
+  memcpy(&pkt->data[5], ow_dev[ow[ch].dev[i]].addr, 8);
+  memcpy(&pkt->data[13], &ow_dev[ow[ch].dev[i]].result, sizeof(s16));
   pkt->data[1] = 11;
   pkt->len = 15;
   return 1;
@@ -993,6 +1077,10 @@ void interrupt::DMA1_Channel1()
   ++dma_count;
   DMA_ADC1::clearGlobalFlag();
 
+  regs.adc_in0 = dma_adc_buff[0] * conf.kv_in[0].k / 1024 + conf.kv_in[0].c;
+  regs.adc_in1 = dma_adc_buff[1] * conf.kv_in[1].k / 1024 + conf.kv_in[1].c;
+  regs.adc_12v = dma_adc_buff[2] * conf.kv_12v.k / 1024 + conf.kv_12v.c;
+  
   DMA_ADC1::disablePeripheral();
   DMA_ADC1::setNumberOfTransactions(NUM_DMA_ADC);
 }
