@@ -1,0 +1,22 @@
+{
+    "configurations": [
+        {
+            "name": "Linux",
+            "includePath": [
+                "${workspaceFolder}",
+                "${workspaceFolder}/libstm32pp/include"
+            ],
+            "defines": [
+                "STM32F1XX"
+            ],
+            "compilerPath": "/usr/bin/arm-none-eabi-g++",
+            "cStandard": "c11",
+            "cppStandard": "c++11",
+            "intelliSenseMode": "${default}",
+            "compilerArgs": [
+                "-mcpu=cortex-m3"
+            ]
+        }
+    ],
+    "version": 4
+}
